@@ -241,12 +241,21 @@ class master_server(SocketServer.ThreadingMixIn, SocketServer.UnixStreamServer):
 
 def start_service(unixsock):
     try:
-        server = master_server(unixsock, master_handler)
-        
-        # main loop
-        server_thread = threading.Thread(target=server.serve_forever)
-        server_thread.daemon = True
-        server_thread.start()
+        pid=os.fork()
+        if(pid>0):
+            time.sleep(1)
+        else:
+            import daemon
+            
+            with daemon.DaemonContext():
+                server = master_server(unixsock, master_handler)
+                
+                # main loop
+                server_thread = threading.Thread(target=server.serve_forever)
+                server_thread.daemon = True
+                server_thread.start()
+                time.sleep(db.timeout*60)
+                os.remove(unixsock)
     except:
         print "Error: can't start the master service."
 
@@ -306,7 +315,10 @@ def test():
         client(unixsock)
     except:
         try:
-            os.remove(unixsock)
+            try:
+                os.remove(unixsock)
+            except:
+                pass
             start_service(unixsock)
             client(unixsock)
         except:
