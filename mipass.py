@@ -1,20 +1,15 @@
 # a server provides password cache and lookup service
+# depend on pycrypto, python-daemon
 
 # password format:
-# id_md5_hashed_and_hex = seq,pass_aes_encrypted_by_second_key_and_hex
+# id_md5_hashed_and_hex = seq,pass_aes_encrypted_by_master_key_and_hex
 # hex: binascii.b2a_hex(s)
-# seq is used to generate the IV, sha256 using the second key
+# seq is used to generate the IV, sha256 using the master key
 
 # master key:
-# master = maseter_key_md5_hash_and_hex
-# second = seq,second_key_aes_encrypted_by_master_key_and_hex
-#   the second key is (a 240bit-long random string, plus its least 16bit of crc32) 
-#   and it should be changed when the master key is changed.
-#   Crypto.Random.get_random_bytes(30)
-#   binascii.crc32(str) & 0xffff
-#   seq is used to generate the IV, sha256 using the master key
+# master = maseter_key_md5_first_4_bytes_and_hex
 
-import Crypto
+import Crypto.Hash.MD5
 from binascii import b2a_hex, a2b_hex
 
 import socket
@@ -32,11 +27,12 @@ conf_fn = os.path.expanduser(conf_fn)
 unixsock = "~/.missh.sock"
 unixsock = os.path.expanduser(unixsock)
 
+server = 0
 # utility functions
 
 def remove_remark(line):
     pos = line.find("#")
-    if(pos > 0):
+    if(pos >= 0):
         line = line[:pos]
     line = line.strip()
     return line
@@ -59,8 +55,8 @@ def secure_replace_file(old_fn, new_fn):
         os.rename(old_fn, back_fn)
         # mov new_fn to old_fn
         os.rename(new_fn, old_fn)
-    except:
-        print "Error: can't replace %s!" % old_fn
+    except Exception, err:
+        print str(err)
         return
         
     # write rubbish to back_fn
@@ -109,8 +105,8 @@ def get_seq(s):
 class pass_db:
     fn = null_str
     master_hash = null_str
-    second_enc = null_str
-    password = {}  # id:pass, as in file
+    master = null_str
+    password_enc = {}  # id:pass, as in file
     max_seq = 0  # for IV
     timeout = 120  # in min
     init_ok = False
@@ -136,11 +132,10 @@ class pass_db:
                 try:
                     key, val = get_key_val(line)
                     if(key == "master"):
-                        self.master_hash = mi_decrypt(val)
-                    elif(key == "second"):
-                        self.second_enc = val
+                        self.master_hash = val
                     elif(key == "timeout"):
                         self.timeout = int(val)
+                        #print "timeout:", val
                     elif(key == ""):
                         raise "no key"
                     else:
@@ -155,17 +150,37 @@ class pass_db:
             print "bad configuration file:", self.fn
             return
         
+    def get_master_hash(self, master):
+        assert master!=null_str
+        
+        m=Crypto.Hash.MD5.new()
+        m.update(master)
+        return m.hexdigest()[:8]
+        
+    def set_master(self, master):
+        # update password_enc
+        
+        self.master=master
+        
+    def check_master(self, master):
+        if(self.get_master_hash(master)==self.master_hash):
+            self.master=master
+            
     def write_cfg(self):
+        if(self.master==null_str):
+            print "Error: can't write cfg without a master password"
+            return
+        
         new_fn = self.fn + ".new"
         # write to new_fn
         try:
             f = open(new_fn, 'wb')
-            f.write("master = %s\n" % b2a_hex(self.master_hash))
-            f.write("second = %s\n" % b2a_hex(self.second_enc))
+            f.write("# don't edit this file manually. please use 'missh -c'.\n")
             f.write("timeout = %d\n" % self.timeout)
+            f.write("master = %s\n" % self.get_master_hash(self.master))
             f.write("\n")
-            for i in self.password:
-                f.write("%s = %s\n" % (b2a_hex(i), b2a_hex(self.password[i])))
+            for i in self.password_enc:
+                f.write("%s = %s\n" % (i, self.password_enc[i]))
             f.flush()
             os.fsync(f.fileno())
             f.close()
@@ -189,10 +204,14 @@ class pass_db:
         
 db = pass_db(conf_fn)
 
+ms_start="start"
+ms_got_master="got_master"
+ms_no_cfg="no_cfg_yet"
+
 class master_handler(SocketServer.BaseRequestHandler):
     data = ""
     fin = False
-    state = 'start'  # 'got_master', 'no_cfg_yet'
+    state = ms_start # 'got_master', 'no_cfg_yet'
     
     def recv_line(self):
         while(1):
@@ -221,25 +240,50 @@ class master_handler(SocketServer.BaseRequestHandler):
                 self.request.sendall('version 0.0.1\n')
                 continue
             elif header == "get_pass":
-                if self.state == 'got_master':
+                if self.state == ms_got_master:
                     self.request.sendall("pass %s\n" % db.get_password(body))
                 else:
                     self.request.sendall("error no master for pass\n")
                 continue
             elif header == "master":
-                if self.state == 'got_master':
+                if self.state == ms_got_master:
                     self.request.sendall("error got master already\n")
-                elif self.state == 'start':
+                elif self.state == ms_start:
                     raise "[todo]"
                 continue
             elif header == 'set_master':
-                raise "[todo]"
+                db.set_master(body)
+                db.write_cfg()
+                self.request.sendall("update master: %s\n" % body)
                 continue
+            elif header == 'kill':
+                self.request.sendall("kill %d\n" % os.getpid() )
+                try:
+                    os.remove(unixsock) # [FIXME]
+                except:
+                    pass
+                os.kill(os.getpid(),9)
+                break
+            elif header == '':
+                continue
+            print "unknown header:'%s'" % header
             
 class master_server(SocketServer.ThreadingMixIn, SocketServer.UnixStreamServer):
     pass
 
 def start_service(unixsock):
+    server = master_server(unixsock, master_handler)
+    
+    # main loop
+    server_thread = threading.Thread(target=server.serve_forever)
+    server_thread.daemon = True
+    server_thread.start()
+    time.sleep(db.timeout*60)
+    server.shutdown()
+    os.remove(unixsock)
+    os._exit(0)
+
+def start_service_daemon(unixsock):
     try:
         pid=os.fork()
         if(pid>0):
@@ -248,31 +292,81 @@ def start_service(unixsock):
             import daemon
             
             with daemon.DaemonContext():
-                server = master_server(unixsock, master_handler)
-                
-                # main loop
-                server_thread = threading.Thread(target=server.serve_forever)
-                server_thread.daemon = True
-                server_thread.start()
-                time.sleep(db.timeout*60)
-                os.remove(unixsock)
+                start_service(unixsock)
     except:
         print "Error: can't start the master service."
 
-def client(unixsock):
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(unixsock)
-    try:
-        print "get state"
-        sock.sendall("state\n")
-        response = sock.recv(1024)
-        print response
-    finally:
-        sock.close()
+class client:
+    sock_fn=""
+    connected=False
+    data=""
+    
+    def __init__(self, unixsock):
+        self.sock_fn = unixsock
+        
+    def recv_line(self):
+        assert self.connected
+        while(1):
+            pos = self.data.find('\n')
+            if pos >= 0:
+                s = self.data[:pos]
+                self.data = self.data[pos + 1:]
+                return s
+            d = self.sock.recv(1024)
+            if len(d) == 0:
+                # connection closed
+                s = self.data
+                self.data = ""
+                self.close()
+                return s
+            self.data = self.data + d
+        
+        
+    def connect(self):
+        if self.connected:
+            return
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self.sock.connect(self.sock_fn)
+            self.connected=True
 
+            print "get state"
+            self.sock.sendall("state\n")
+            response = self.recv_line()
+            print "resp:", response
+        except Exception, err:
+            print "Error:", str(err)
+            self.sock.close()
+            print "Error: can't connect"
+            self.connected=False
+            pass
+
+    def kill(self):
+        assert self.connected
+        self.sock.sendall("kill\n")
+        resp=self.recv_line()
+        print "kill, resp:",resp
+        self.close()
+        
+    def set_master(self, master):
+        assert self.connected
+        self.sock.sendall("set_master %s\n" % master)
+        resp = self.recv_line()
+        print "set_master, resp:", resp
+        
+    def close(self):
+        print "closed"
+        if self.connected:
+            try:
+                self.sock.close()
+            except:
+                pass
+            self.connected=False
+         
 def usage():
     print """Test usage:
 mipass [opt] [id]
+   -d      front daemon mode
    -s pass set pass
    -M pass set master pass
    -m pass master pass
@@ -282,17 +376,20 @@ mipass [opt] [id]
 def test():
     import getopt
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hs:m:M:k")
+        opts, args = getopt.getopt(sys.argv[1:], "dhs:m:M:k")
     except getopt.GetoptError as err:
         print str(err)  # will print something like "option -a not recognized"
         usage()
         sys.exit(2)
 
+    #secure_replace_file(conf_fn, conf_fn+".new")
     setting = False
     password = null_str
     setting_master = False
     master = null_str
-        
+    kill = False
+    front_server = False
+    
     for o, a in opts:
         if o == "-h":
             usage()
@@ -306,30 +403,50 @@ def test():
             master = a
             setting_master = True
         elif o == '-k':
-            raise "[TODO]"
+            kill=True
+        elif o == '-d':
+            front_server=True
         else:
             assert False, "unhandled option"
     
     # check whether the service is started
-    try:
-        client(unixsock)
-    except:
+    if(front_server):
         try:
-            try:
-                os.remove(unixsock)
-            except:
-                pass
-            start_service(unixsock)
-            client(unixsock)
+            os.remove(unixsock)
         except:
-            print "can't start service"
+            pass
+
+        start_service(unixsock)
+        return
+    
+    c=client(unixsock)
+    c.connect()
+    if not c.connected:
+        if kill:
+            sys.exit(0)
+        try:
+            os.remove(unixsock)
+        except:
+            pass
+        try:
+            start_service_daemon(unixsock)
+        except:
+            pass
+        c.connect()
+    if not c.connected:
+        print "can't start service"
+        sys.exit(1)
+    if kill:
+        c.kill()
+        sys.exit(0)
     # set/put master pass
+    if setting_master:
+        c.set_master(master)
     
     # set/get pass
     
     # close
-    
-    pass
+    c.close()
 
 if __name__ == "__main__":
     test()
