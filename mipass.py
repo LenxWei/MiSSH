@@ -9,7 +9,8 @@
 # master key:
 # master = maseter_key_md5_first_4_bytes_and_hex
 
-import Crypto.Hash.MD5
+from Crypto.Hash import MD5, SHA256
+from Crypto.Cipher import AES
 from binascii import b2a_hex, a2b_hex
 
 import socket
@@ -78,20 +79,70 @@ def secure_replace_file(old_fn, new_fn):
         print "Error: can't delete the old conf file at %s" % back_fn
 
 def get_header(s):
+    '''
+    split the line using ' '
+    '''
     pos = s.find(' ')
     if(pos > 0):
-        return s[:pos].strip().lower(), s[pos + 1:].strip()
-    return s.strip().lower(), ''
+        return s[:pos].lower(), s[pos + 1:]
+    return s.lower(), ''
     
+def mi_getseq(enc):
+    pos=enc.find(',')
+    if pos>=0:
+        try:
+            seq=int(enc[:pos])
+            return seq
+        except:
+            pass
+    print "bad seq:",enc
+    return 0
+
+def gen_AES_param(seq, key):
+    m=SHA256.new(key)
+    k=m.digest() # 32bytes
+    m.update(str(seq))
+    iv=m.digest()[:16]
+    return k,iv
+
 # encrypt/decrypt
-def mi_decrypt(seq, enc, key):
+def mi_decrypt(enc, key):
     # [todo]
-    return enc 
-    pass
+    seq=None
+    pos=enc.find(',')
+    if pos>=0:
+        try:
+            seq=int(enc[:pos])
+        except:
+            pass
+    if seq==None:
+        print "bad seq:",enc
+        return ""
+    
+    try:
+        body=a2b_hex(enc[pos+1:])
+    except:
+        print "bad enc:", enc
+        return ""
+    
+    k, iv=gen_AES_param(seq, key)
+    obj=AES.new(k, AES.MODE_CBC, iv)
+    try:
+        plain=obj.decrypt(body)
+    except Exception, err:
+        print str(err)
+        return ""
+    
+    return plain.lstrip('\n')
 
 def mi_encrypt(seq, plain, key):
-    # [todo]
-    return plain 
+    k, iv=gen_AES_param(seq, key)
+    obj=AES.new(k, AES.MODE_CBC, iv)
+    
+    body=plain + '\n' * (32 - (len(plain)-1) % 32 -1)
+    enc=obj.encrypt(body)
+    return "%d,%s" % ( seq, b2a_hex(enc))
+
     pass
 
 def get_seq(s):
@@ -107,7 +158,7 @@ class pass_db:
     master_hash = null_str
     master = null_str
     password_enc = {}  # id:pass, as in file
-    max_seq = 0  # for IV
+    seq = 0  # for IV
     timeout = 120  # in min
     init_ok = False
     
@@ -139,7 +190,10 @@ class pass_db:
                     elif(key == ""):
                         raise "no key"
                     else:
-                        self.password[key] = val
+                        seq,enc=get_seq(val)
+                        if(self.seq < seq):
+                            self.seq=seq
+                        self.password_enc[key] = val
                 except:
                     print "error config line #%d : %s" % (line_cnt, line)
                     continue
@@ -153,18 +207,35 @@ class pass_db:
     def get_master_hash(self, master):
         assert master!=null_str
         
-        m=Crypto.Hash.MD5.new()
+        m=MD5.new()
         m.update(master)
         return m.hexdigest()[:8]
         
+    def set_pass(self, id, pwd):
+        self.seq=self.seq+1
+        self.password_enc[id]=mi_encrypt(self.seq, pwd, self.master)
+        
+    def get_pass(self, id):
+        enc=self.password_enc.get(id)
+        if enc!=None:
+            return mi_decrypt(enc, self.master)
+        return None
+    
     def set_master(self, master):
         # update password_enc
         
+        new_pass={}
+        for i in self.password_enc:
+            self.seq=self.seq+1
+            new_pass[i]=mi_encrypt(self.seq, mi_decrypt(self.password_enc[i], self.master), master)
         self.master=master
+        self.password_enc=new_pass
         
     def check_master(self, master):
         if(self.get_master_hash(master)==self.master_hash):
             self.master=master
+            return 1
+        return 0
             
     def write_cfg(self):
         if(self.master==null_str):
@@ -214,6 +285,9 @@ class master_handler(SocketServer.BaseRequestHandler):
     state = ms_start # 'got_master', 'no_cfg_yet'
     
     def recv_line(self):
+        """
+        return a line without '\n' from the buffer
+        """
         while(1):
             pos = self.data.find('\n')
             if pos >= 0:
@@ -241,20 +315,34 @@ class master_handler(SocketServer.BaseRequestHandler):
                 continue
             elif header == "get_pass":
                 if self.state == ms_got_master:
-                    self.request.sendall("pass %s\n" % db.get_password(body))
+                    self.request.sendall("pass %s\n" % db.get_pass(body))
                 else:
-                    self.request.sendall("error no master for pass\n")
+                    self.request.sendall("Error: no master for pass\n")
                 continue
-            elif header == "master":
-                if self.state == ms_got_master:
-                    self.request.sendall("error got master already\n")
-                elif self.state == ms_start:
-                    raise "[todo]"
+            elif header == "check_master":
+                r=db.check_master(body)
+                if(r):
+                    if self.state == ms_start:
+                        self.state=ms_got_master
+                self.request.sendall("check_master: %s\n" % str(r))
                 continue
             elif header == 'set_master':
                 db.set_master(body)
+                if self.state == ms_start:
+                    self.state=ms_got_master
                 db.write_cfg()
                 self.request.sendall("update master: %s\n" % body)
+                continue
+            elif header == 'set_pass':
+                pos=body.find(",")
+                if(pos<=0):
+                    self.request.sendall("Error: bad id %s\n" % body)
+                    continue
+                id=body[:pos]
+                pwd=body[pos+1:]
+                db.set_pass(id,pwd)
+                db.write_cfg()
+                self.request.sendall("update pass: %s, %s\n" % (id,pwd))
                 continue
             elif header == 'kill':
                 self.request.sendall("kill %d\n" % os.getpid() )
@@ -354,6 +442,24 @@ class client:
         resp = self.recv_line()
         print "set_master, resp:", resp
         
+    def set_pass(self, id, password):
+        assert self.connected
+        self.sock.sendall("set_pass %s,%s\n" % (id,password))
+        resp = self.recv_line()
+        print "set_pass, resp:", resp
+        
+    def get_pass(self, id):
+        assert self.connected
+        self.sock.sendall("get_pass %s\n" % id)
+        resp = self.recv_line()
+        print "get_pass, resp:", resp
+        
+    def check_master(self, master):
+        assert self.connected
+        self.sock.sendall("check_master %s\n" % master)
+        resp = self.recv_line()
+        print "check_master, resp:", resp
+        
     def close(self):
         print "closed"
         if self.connected:
@@ -382,6 +488,10 @@ def test():
         usage()
         sys.exit(2)
 
+    id=None
+    if len(args)>0:
+        id=args[0]
+        
     #secure_replace_file(conf_fn, conf_fn+".new")
     setting = False
     password = null_str
@@ -442,7 +552,14 @@ def test():
     # set/put master pass
     if setting_master:
         c.set_master(master)
+    else:
+        c.check_master(master)
     
+    if setting:
+        c.set_pass(id, password)
+    else:
+        c.get_pass(id)
+        
     # set/get pass
     
     # close
