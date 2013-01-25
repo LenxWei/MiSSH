@@ -20,7 +20,9 @@ import os
 import time 
 import sys
 
-null_str = '\n'
+null_str = None
+
+verbose = False
 
 conf_fn = "~/.missh"
 conf_fn = os.path.expanduser(conf_fn)
@@ -29,6 +31,7 @@ unixsock = "~/.missh.sock"
 unixsock = os.path.expanduser(unixsock)
 
 server = 0
+
 # utility functions
 
 def remove_remark(line):
@@ -43,40 +46,6 @@ def get_key_val(line):
     if(pos < 0):
         return "", ""
     return line[:pos].strip().lower(), line[pos + 1:].strip()
-    
-def secure_replace_file(old_fn, new_fn):
-    back_fn = old_fn + ".old"
-    try:
-        os.remove(back_fn)
-    except:
-        pass
-
-    try:
-        # mov old_fn to back_fn
-        os.rename(old_fn, back_fn)
-        # mov new_fn to old_fn
-        os.rename(new_fn, old_fn)
-    except Exception, err:
-        print str(err)
-        return
-        
-    # write rubbish to back_fn
-    # flush
-    # delete back_fn
-    try:
-        f = open(back_fn, 'r+b')
-        f.seek(0, os.SEEK_END)
-        length = f.tell()
-        f.seek(0, os.SEEK_SET)
-        rub = 'F' * 63 + '\n'
-        for i in xrange(0, length / 64 + 1):
-            f.write(rub)
-        f.flush()
-        os.fsync(f.fileno())
-        f.close()
-        os.remove(back_fn)
-    except:
-        print "Error: can't delete the old conf file at %s" % back_fn
 
 def get_header(s):
     '''
@@ -88,47 +57,47 @@ def get_header(s):
     return s.lower(), ''
     
 def mi_getseq(enc):
-    pos=enc.find(',')
-    if pos>=0:
+    pos = enc.find(',')
+    if pos >= 0:
         try:
-            seq=int(enc[:pos])
+            seq = int(enc[:pos])
             return seq
         except:
             pass
-    print "bad seq:",enc
+    print "bad seq:", enc
     return 0
 
 def gen_AES_param(seq, key):
-    m=SHA256.new(key)
-    k=m.digest() # 32bytes
+    m = SHA256.new(key)
+    k = m.digest()  # 32bytes
     m.update(str(seq))
-    iv=m.digest()[:16]
-    return k,iv
+    iv = m.digest()[:16]
+    return k, iv
 
 # encrypt/decrypt
 def mi_decrypt(enc, key):
     # [todo]
-    seq=None
-    pos=enc.find(',')
-    if pos>=0:
+    seq = None
+    pos = enc.find(',')
+    if pos >= 0:
         try:
-            seq=int(enc[:pos])
+            seq = int(enc[:pos])
         except:
             pass
-    if seq==None:
-        print "bad seq:",enc
+    if seq == None:
+        print "bad seq:", enc
         return ""
     
     try:
-        body=a2b_hex(enc[pos+1:])
+        body = a2b_hex(enc[pos + 1:])
     except:
         print "bad enc:", enc
         return ""
     
-    k, iv=gen_AES_param(seq, key)
-    obj=AES.new(k, AES.MODE_CBC, iv)
+    k, iv = gen_AES_param(seq, key)
+    obj = AES.new(k, AES.MODE_CBC, iv)
     try:
-        plain=obj.decrypt(body)
+        plain = obj.decrypt(body)
     except Exception, err:
         print str(err)
         return ""
@@ -136,12 +105,12 @@ def mi_decrypt(enc, key):
     return plain.lstrip('\n')
 
 def mi_encrypt(seq, plain, key):
-    k, iv=gen_AES_param(seq, key)
-    obj=AES.new(k, AES.MODE_CBC, iv)
+    k, iv = gen_AES_param(seq, key)
+    obj = AES.new(k, AES.MODE_CBC, iv)
     
-    body=plain + '\n' * (32 - (len(plain)-1) % 32 -1)
-    enc=obj.encrypt(body)
-    return "%d,%s" % ( seq, b2a_hex(enc))
+    body = plain + '\n' * (32 - (len(plain) - 1) % 32 - 1)
+    enc = obj.encrypt(body)
+    return "%d,%s" % (seq, b2a_hex(enc))
 
     pass
 
@@ -152,6 +121,10 @@ def get_seq(s):
     else:
         return 0, s[p + 1:]
     
+ms_start = "start"
+ms_got_master = "got_master"
+ms_no_cfg = "no_cfg_yet"
+
 # configuration file
 class pass_db:
     fn = null_str
@@ -184,86 +157,111 @@ class pass_db:
                     key, val = get_key_val(line)
                     if(key == "master"):
                         self.master_hash = val
+                        # print "master:",val
                     elif(key == "timeout"):
                         self.timeout = int(val)
-                        #print "timeout:", val
+                        # print "timeout:", val
                     elif(key == ""):
                         raise "no key"
                     else:
-                        seq,enc=get_seq(val)
+                        seq, enc = get_seq(val)
                         if(self.seq < seq):
-                            self.seq=seq
+                            self.seq = seq
                         self.password_enc[key] = val
                 except:
                     print "error config line #%d : %s" % (line_cnt, line)
                     continue
             
-            self.init_ok = True
+            self.init_ok = self.master_hash != null_str
+            # print "init:", self.init_ok
             f.close() 
         except:
             print "bad configuration file:", self.fn
             return
         
     def get_master_hash(self, master):
-        assert master!=null_str
+        assert master != null_str
         
-        m=MD5.new()
+        m = MD5.new()
         m.update(master)
         return m.hexdigest()[:8]
         
     def set_pass(self, id, pwd):
-        self.seq=self.seq+1
-        self.password_enc[id]=mi_encrypt(self.seq, pwd, self.master)
+        self.seq = self.seq + 1
+        self.password_enc[id] = mi_encrypt(self.seq, pwd, self.master)
         
     def get_pass(self, id):
-        enc=self.password_enc.get(id)
-        if enc!=None:
+        enc = self.password_enc.get(id)
+        if enc != None:
             return mi_decrypt(enc, self.master)
-        return None
+        return null_str
     
     def set_master(self, master):
         # update password_enc
         
-        new_pass={}
+        new_pass = {}
+        if len(self.password_enc) > 0 and self.master == null_str:
+            return False
+        
         for i in self.password_enc:
-            self.seq=self.seq+1
-            new_pass[i]=mi_encrypt(self.seq, mi_decrypt(self.password_enc[i], self.master), master)
-        self.master=master
-        self.password_enc=new_pass
+            self.seq = self.seq + 1
+            new_pass[i] = mi_encrypt(self.seq, mi_decrypt(self.password_enc[i], self.master), master)
+        self.master = master
+        self.password_enc = new_pass
+        return True
         
     def check_master(self, master):
-        if(self.get_master_hash(master)==self.master_hash):
-            self.master=master
+        if(self.get_master_hash(master) == self.master_hash):
+            self.master = master
             return 1
         return 0
             
     def write_cfg(self):
-        if(self.master==null_str):
+        if(self.master == null_str):
             print "Error: can't write cfg without a master password"
-            return
+            return False
         
         new_fn = self.fn + ".new"
+        old_fn = self.fn + ".old"
+        try:
+            os.rename(old_fn, new_fn)
+        except:
+            pass
+        
         # write to new_fn
         try:
-            f = open(new_fn, 'wb')
+            try:
+                f = open(new_fn, 'r+b')
+            except:
+                f = open(new_fn, 'wb')
             f.write("# don't edit this file manually. please use 'missh -c'.\n")
             f.write("timeout = %d\n" % self.timeout)
             f.write("master = %s\n" % self.get_master_hash(self.master))
             f.write("\n")
             for i in self.password_enc:
                 f.write("%s = %s\n" % (i, self.password_enc[i]))
+            f.truncate()
             f.flush()
             os.fsync(f.fileno())
             f.close()
-        except:
+        except Exception, e:
+            print str(e)
             print "Error: can't write to %s." % new_fn
-            return
+            return False
         
         try:
-            secure_replace_file(self.fn, new_fn)
+            os.rename(self.fn, old_fn)
         except:
-            print "Error: can't generate the new %s file." % self.fn
-         
+            print "Error: can't rotate %s" % self.fn
+            return False
+        
+        try:
+            os.rename(new_fn, self.fn)
+        except:
+            print "Error: can't replace %s" % self.fn
+            return False
+        return True
+
     def get_password(self, i):
         # id is in binary string format
         p = self.password.get(i)
@@ -273,16 +271,23 @@ class pass_db:
         seq, enc = get_seq(p)
         q = mi_decrypt(seq, enc, self.second_enc)
         
+    def state(self):
+        if self.init_ok == null_str:
+            return ms_no_cfg
+        elif self.master == null_str:
+            return ms_start
+        else:
+            return ms_got_master
+        
 db = pass_db(conf_fn)
 
-ms_start="start"
-ms_got_master="got_master"
-ms_no_cfg="no_cfg_yet"
-
+                
 class master_handler(SocketServer.BaseRequestHandler):
     data = ""
     fin = False
-    state = ms_start # 'got_master', 'no_cfg_yet'
+
+    def state(self):
+        return db.state()
     
     def recv_line(self):
         """
@@ -304,53 +309,65 @@ class master_handler(SocketServer.BaseRequestHandler):
             self.data = self.data + d
     
     def handle(self):
+        # [a:master:server:handle]
         while not self.fin:
             line = self.recv_line()
             header, body = get_header(line)
             if header == 'state':
-                self.request.sendall('state %s\n' % self.state)
+                self.request.sendall('state: %s\n' % self.state())
                 continue
             elif header == 'version':
                 self.request.sendall('version 0.0.1\n')
                 continue
             elif header == "get_pass":
-                if self.state == ms_got_master:
-                    self.request.sendall("pass %s\n" % db.get_pass(body))
+                if self.state() == ms_got_master:
+                    pwd = db.get_pass(body)
+                    if pwd == null_str:
+                        self.request.sendall("Error: '%s' doesn't exist\n" % body)
+                    else:
+                        self.request.sendall("get_pass: %s\n" % pwd)
                 else:
                     self.request.sendall("Error: no master for pass\n")
                 continue
             elif header == "check_master":
-                r=db.check_master(body)
-                if(r):
-                    if self.state == ms_start:
-                        self.state=ms_got_master
+                if self.state() == ms_no_cfg:
+                    self.request.sendall("Error: no valid config file\n")
+                    continue
+                r = db.check_master(body)
                 self.request.sendall("check_master: %s\n" % str(r))
                 continue
             elif header == 'set_master':
-                db.set_master(body)
-                if self.state == ms_start:
-                    self.state=ms_got_master
-                db.write_cfg()
-                self.request.sendall("update master: %s\n" % body)
+                if db.set_master(body):
+                    if db.write_cfg():
+                        self.request.sendall("set_master: %s\n" % body)
+                    else:
+                        self.request.sendall("Error: updating config file failed\n")
+                else:
+                    self.request.sendall("Error: need old master key for existing passwords\n")
                 continue
             elif header == 'set_pass':
-                pos=body.find(",")
-                if(pos<=0):
+                pos = body.find(",")
+                if(pos <= 0):
                     self.request.sendall("Error: bad id %s\n" % body)
                     continue
-                id=body[:pos]
-                pwd=body[pos+1:]
-                db.set_pass(id,pwd)
-                db.write_cfg()
-                self.request.sendall("update pass: %s, %s\n" % (id,pwd))
+                if self.state() != ms_got_master:
+                    self.request.sendall("Error: no master key yet\n")
+                    continue
+                id = body[:pos]
+                pwd = body[pos + 1:]
+                db.set_pass(id, pwd)
+                if db.write_cfg():
+                    self.request.sendall("set_pass: %s, %s\n" % (id, pwd))
+                else:
+                    self.request.sendall("Error: updating config file failed\n")
                 continue
             elif header == 'kill':
-                self.request.sendall("kill %d\n" % os.getpid() )
+                self.request.sendall("kill %d\n" % os.getpid())
                 try:
-                    os.remove(unixsock) # [FIXME]
+                    os.remove(unixsock)  # [FIXME]
                 except:
                     pass
-                os.kill(os.getpid(),9)
+                os.kill(os.getpid(), 9)
                 break
             elif header == '':
                 continue
@@ -366,15 +383,15 @@ def start_service(unixsock):
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.daemon = True
     server_thread.start()
-    time.sleep(db.timeout*60)
+    time.sleep(db.timeout * 60)
     server.shutdown()
     os.remove(unixsock)
     os._exit(0)
 
 def start_service_daemon(unixsock):
     try:
-        pid=os.fork()
-        if(pid>0):
+        pid = os.fork()
+        if(pid > 0):
             time.sleep(1)
         else:
             import daemon
@@ -384,10 +401,13 @@ def start_service_daemon(unixsock):
     except:
         print "Error: can't start the master service."
 
+#[a:master:client]
 class client:
-    sock_fn=""
-    connected=False
-    data=""
+    sock_fn = ""
+    connected = False
+    no_cfg = False
+    got_master = False
+    data = ""
     
     def __init__(self, unixsock):
         self.sock_fn = unixsock
@@ -409,42 +429,50 @@ class client:
                 return s
             self.data = self.data + d
         
-        
     def connect(self):
         if self.connected:
             return
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             self.sock.connect(self.sock_fn)
-            self.connected=True
+            self.connected = True
 
-            print "get state"
+            #print "get state"
             self.sock.sendall("state\n")
             response = self.recv_line()
-            print "resp:", response
+            if response == "state: " + ms_got_master:
+                self.got_master = True
+            elif response == "state: " + ms_no_cfg:
+                self.no_cfg = True
+            #print "resp:", response
         except Exception, err:
-            print "Error:", str(err)
+            if verbose:
+                print "Error:", str(err)
             self.sock.close()
-            print "Error: can't connect"
-            self.connected=False
+            if verbose:
+                print "Error: can't connect"
+            self.connected = False
             pass
 
     def kill(self):
         assert self.connected
         self.sock.sendall("kill\n")
-        resp=self.recv_line()
-        print "kill, resp:",resp
+        resp = self.recv_line()
+        print resp
         self.close()
         
     def set_master(self, master):
         assert self.connected
         self.sock.sendall("set_master %s\n" % master)
         resp = self.recv_line()
-        print "set_master, resp:", resp
+        if not resp.startswith("Error"):
+            self.got_master = True
+        else:
+            print resp
         
     def set_pass(self, id, password):
         assert self.connected
-        self.sock.sendall("set_pass %s,%s\n" % (id,password))
+        self.sock.sendall("set_pass %s,%s\n" % (id, password))
         resp = self.recv_line()
         print "set_pass, resp:", resp
         
@@ -452,23 +480,119 @@ class client:
         assert self.connected
         self.sock.sendall("get_pass %s\n" % id)
         resp = self.recv_line()
-        print "get_pass, resp:", resp
+        #print "get_pass, resp:", resp
+        if resp.startswith("get_pass: "):
+            return resp[len("get_pass: "):]
+        return None
         
     def check_master(self, master):
         assert self.connected
         self.sock.sendall("check_master %s\n" % master)
         resp = self.recv_line()
-        print "check_master, resp:", resp
+        if not resp.startswith("Error"):
+            self.got_master = True
+        else:
+            print resp
         
     def close(self):
-        print "closed"
+        #print "closed"
         if self.connected:
             try:
                 self.sock.close()
             except:
                 pass
-            self.connected=False
+            self.connected = False
          
+def host_hash(host):
+    assert host != null_str
+    
+    m = SHA256.new()
+    m.update(host)
+    return m.hexdigest()[:32]
+
+# interface for other modules
+# [a:login:get_password]
+def get_password(host):
+    c = client(unixsock)
+    c.connect()  # should get status, and then determine whether to require the master key
+    # [a:login:get_password:connect]
+    if not c.connected:
+        try:
+            os.remove(unixsock)
+        except:
+            pass
+        try:
+            start_service_daemon(unixsock)
+        except:
+            pass
+        c.connect()
+        if not c.connected:
+            print "Error: can't connect to the master password service."
+            print "Error: can't get password."
+            sys.exit(2)
+        
+    if not c.got_master:
+        #[a:login:get_password:ask master]
+        # ask master password
+        import getpass
+        master_pwd = getpass.getpass("master password:")
+        c.check_master(master_pwd)
+        #[FIXME]
+
+        if not c.got_master:
+            print "Error: no correct master password."
+            sys.exit(1)
+                
+    if verbose:
+        print "host hash is", host_hash(host)
+    pwd= c.get_pass(host_hash(host))
+    c.close()
+    return pwd
+        
+def update_password(host,pwd):
+    c = client(unixsock)
+    c.connect()  # should get status, and then determine whether to require the master key
+    if not c.connected:
+        try:
+            os.remove(unixsock)
+        except:
+            pass
+        try:
+            start_service_daemon(unixsock)
+        except:
+            pass
+        c.connect()
+        if not c.connected:
+            print "Error: can't connect to the master password service."
+            print "Error: can't update password"
+            sys.exit(2)
+        
+    if not c.got_master:
+        # ask master password
+        import getpass
+        master_pwd = getpass.getpass("master password:")
+        c.check_master(master_pwd)
+        #[FIXME]
+
+        if not c.got_master:
+            print "Error: no correct master password."
+            sys.exit(2)
+                
+    if verbose:
+        print "host hash is", host_hash(host)
+    c.set_pass(host_hash(host), pwd)
+    c.close()
+        
+def kill():
+    try:
+        c = client(unixsock)
+        c.connect()
+        if c.connected:
+            c.kill()
+    except Exception, e:
+        print str(e)
+        print "no master password service found"
+    
 def usage():
     print """Test usage:
 mipass [opt] [id]
@@ -476,7 +600,7 @@ mipass [opt] [id]
    -s pass set pass
    -M pass set master pass
    -m pass master pass
-   -k      kill all background missh processes
+   -k      kill the master daemon process
 """
 
 def test():
@@ -488,11 +612,11 @@ def test():
         usage()
         sys.exit(2)
 
-    id=None
-    if len(args)>0:
-        id=args[0]
+    id = None
+    if len(args) > 0:
+        id = args[0]
         
-    #secure_replace_file(conf_fn, conf_fn+".new")
+    # secure_replace_file(conf_fn, conf_fn+".new")
     setting = False
     password = null_str
     setting_master = False
@@ -513,9 +637,9 @@ def test():
             master = a
             setting_master = True
         elif o == '-k':
-            kill=True
+            kill = True
         elif o == '-d':
-            front_server=True
+            front_server = True
         else:
             assert False, "unhandled option"
     
@@ -529,7 +653,7 @@ def test():
         start_service(unixsock)
         return
     
-    c=client(unixsock)
+    c = client(unixsock)
     c.connect()
     if not c.connected:
         if kill:
@@ -550,15 +674,17 @@ def test():
         c.kill()
         sys.exit(0)
     # set/put master pass
-    if setting_master:
-        c.set_master(master)
-    else:
-        c.check_master(master)
+    if master != null_str:
+        if setting_master:
+            c.set_master(master)
+        else:
+            c.check_master(master)
     
-    if setting:
-        c.set_pass(id, password)
-    else:
-        c.get_pass(id)
+    if id != None:
+        if setting:
+            c.set_pass(id, password)
+        else:
+            c.get_pass(id)
         
     # set/get pass
     
