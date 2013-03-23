@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 # a server provides password cache and lookup service
 # depend on pycrypto, python-daemon
 
@@ -8,6 +10,11 @@
 
 # master key:
 # master = maseter_key_md5_first_4_bytes_and_hex
+
+'''A password keeping service.
+
+.. moduleauthor:: Lenx Wei <lenx.wei@gmail.com>
+'''
 
 from Crypto.Hash import MD5, SHA256
 from Crypto.Cipher import AES
@@ -23,6 +30,7 @@ import sys
 null_str = None
 
 verbose = False
+
 
 conf_fn = "~/.missh"
 conf_fn = os.path.expanduser(conf_fn)
@@ -49,7 +57,10 @@ def get_key_val(line):
 
 def get_header(s):
     '''
-    split the line using ' '
+    split the line using ' '.
+    
+    :param s: the input string.
+    :returns: the header, the tail.
     '''
     pos = s.find(' ')
     if(pos > 0):
@@ -105,14 +116,18 @@ def mi_decrypt(enc, key):
     return plain.lstrip('\n')
 
 def mi_encrypt(seq, plain, key):
+    """encrypt a plain password.
+    
+    :param seq: a number, used to generate the IV
+    :param key: a string, as the key
+    :returns: the encrypted string of key
+    """
     k, iv = gen_AES_param(seq, key)
     obj = AES.new(k, AES.MODE_CBC, iv)
     
     body = plain + '\n' * (32 - (len(plain) - 1) % 32 - 1)
     enc = obj.encrypt(body)
     return "%d,%s" % (seq, b2a_hex(enc))
-
-    pass
 
 def get_seq(s):
     p = s.find(",")
@@ -127,6 +142,9 @@ ms_no_cfg = "no_cfg_yet"
 
 # configuration file
 class pass_db:
+    '''
+    the password database
+    '''
     fn = null_str
     master_hash = null_str
     master = null_str
@@ -136,11 +154,20 @@ class pass_db:
     init_ok = False
     
     def __init__(self, fn):
+        '''constructor.
+        
+        read cfg from fn.
+        
+        :param fn: the configuration file name
+        '''
         self.fn = fn
         self.init_ok = False
         self.read_cfg()
         
     def read_cfg(self):
+        '''
+        read configuration from file
+        '''
         line_cnt = 0
         try:
             f = open(self.fn)
@@ -187,17 +214,42 @@ class pass_db:
         return m.hexdigest()[:8]
         
     def set_pass(self, id, pwd):
+        """set password for id
+        
+        self.master should be valid.
+        
+        :param id: the user id
+        :param pwd: the new password
+        """
+        assert self.master!=null_str
+        
         self.seq = self.seq + 1
         self.password_enc[id] = mi_encrypt(self.seq, pwd, self.master)
         
     def get_pass(self, id):
+        """get password of id
+        
+        self.master should be valid.
+        
+        :param id: the user id
+        :returns: the password, None if not existed
+        """
+        
+        assert self.master!=null_str
+        
         enc = self.password_enc.get(id)
         if enc != None:
             return mi_decrypt(enc, self.master)
         return null_str
     
     def set_master(self, master):
-        # update password_enc
+        """set a new master key.
+        
+        self.master should be valid when some passwords already exist.
+        
+        :param master: the new master key
+        :returns: True if succeeds, False otherwise
+        """
         
         new_pass = {}
         if len(self.password_enc) > 0 and self.master == null_str:
@@ -206,8 +258,11 @@ class pass_db:
         for i in self.password_enc:
             self.seq = self.seq + 1
             new_pass[i] = mi_encrypt(self.seq, mi_decrypt(self.password_enc[i], self.master), master)
+            
         self.master = master
         self.password_enc = new_pass
+        
+        self.write_cfg()
         return True
         
     def check_master(self, master):
