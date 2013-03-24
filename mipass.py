@@ -27,8 +27,6 @@ import os
 import time 
 import sys
 
-null_str = None
-
 verbose = False
 
 
@@ -85,9 +83,13 @@ def gen_AES_param(seq, key):
     iv = m.digest()[:16]
     return k, iv
 
-# encrypt/decrypt
 def mi_decrypt(enc, key):
-    # [todo]
+    '''decrypt an encrypted password.
+    
+    :param enc: the encrypted password
+    :param key: the key
+    :returns: the plain if succeeds, None otherwise
+    '''
     seq = None
     pos = enc.find(',')
     if pos >= 0:
@@ -97,13 +99,13 @@ def mi_decrypt(enc, key):
             pass
     if seq == None:
         print "bad seq:", enc
-        return ""
+        return None
     
     try:
         body = a2b_hex(enc[pos + 1:])
     except:
         print "bad enc:", enc
-        return ""
+        return None
     
     k, iv = gen_AES_param(seq, key)
     obj = AES.new(k, AES.MODE_CBC, iv)
@@ -111,16 +113,25 @@ def mi_decrypt(enc, key):
         plain = obj.decrypt(body)
     except Exception, err:
         print str(err)
-        return ""
+        return None
     
     return plain.lstrip('\n')
 
 def mi_encrypt(seq, plain, key):
     """encrypt a plain password.
     
+    algorithm::
+
+       key1 = SHA256(key)
+       iv = SHA256(key, str(seq))
+       body = plain padded using '\\n' to be aligned with 32bytes
+       enc = AES.CBC(body, key1, iv)
+       encrypted password = seq,enc
+    
     :param seq: a number, used to generate the IV
+    :param plain: the plain password
     :param key: a string, as the key
-    :returns: the encrypted string of key
+    :returns: the encrypted password
     """
     k, iv = gen_AES_param(seq, key)
     obj = AES.new(k, AES.MODE_CBC, iv)
@@ -136,18 +147,18 @@ def get_seq(s):
     else:
         return 0, s[p + 1:]
     
-ms_start = "start"
-ms_got_master = "got_master"
-ms_no_cfg = "no_cfg_yet"
+ms_start = 0
+ms_got_master = 1
+ms_no_cfg = 2
 
 # configuration file
 class pass_db:
     '''
     the password database
     '''
-    fn = null_str
-    master_hash = null_str
-    master = null_str
+    fn = None
+    master_hash = None
+    master = None
     password_enc = {}  # id:pass, as in file
     seq = 0  # for IV
     timeout = 120  # in min
@@ -199,7 +210,7 @@ class pass_db:
                     print "error config line #%d : %s" % (line_cnt, line)
                     continue
             
-            self.init_ok = self.master_hash != null_str
+            self.init_ok = self.master_hash != None
             # print "init:", self.init_ok
             f.close() 
         except:
@@ -207,7 +218,18 @@ class pass_db:
             return
         
     def get_master_hash(self, master):
-        assert master != null_str
+        '''master hash.
+        
+        only store master_hash in cfg.
+        
+        algorithm::
+        
+           hex(MD5(master))[:8]
+        
+        :param master: the master key
+        :returns: the hash   
+        '''
+        assert master != None
         
         m = MD5.new()
         m.update(master)
@@ -221,7 +243,7 @@ class pass_db:
         :param id: the user id
         :param pwd: the new password
         """
-        assert self.master!=null_str
+        assert self.master!=None
         
         self.seq = self.seq + 1
         self.password_enc[id] = mi_encrypt(self.seq, pwd, self.master)
@@ -235,12 +257,12 @@ class pass_db:
         :returns: the password, None if not existed
         """
         
-        assert self.master!=null_str
+        assert self.master!=None
         
         enc = self.password_enc.get(id)
         if enc != None:
             return mi_decrypt(enc, self.master)
-        return null_str
+        return None
     
     def set_master(self, master):
         """set a new master key.
@@ -252,7 +274,7 @@ class pass_db:
         """
         
         new_pass = {}
-        if len(self.password_enc) > 0 and self.master == null_str:
+        if len(self.password_enc) > 0 and self.master == None:
             return False
         
         for i in self.password_enc:
@@ -266,13 +288,24 @@ class pass_db:
         return True
         
     def check_master(self, master):
+        ''' Check whether the master is correct or not.
+        
+        :param master: the key to be tested
+        :returns: 1 if succeeds, 0 otherwise
+        '''
+        
         if(self.get_master_hash(master) == self.master_hash):
             self.master = master
             return 1
         return 0
             
     def write_cfg(self):
-        if(self.master == null_str):
+        '''write the new configuration file.
+        
+        using two files to replace each other, in order to control the potential leakage.
+        '''
+        
+        if(self.master == None):
             print "Error: can't write cfg without a master password"
             return False
         
@@ -317,27 +350,28 @@ class pass_db:
             return False
         return True
 
-    def get_password(self, i):
-        # id is in binary string format
-        p = self.password.get(i)
-        if(p == None):
-            return null_str
-
-        seq, enc = get_seq(p)
-        q = mi_decrypt(seq, enc, self.second_enc)
-        
     def state(self):
-        if self.init_ok == null_str:
+        """return the current state.
+        
+        There are 3 possible states:
+        
+        * ms_no_cfg : the database is not correctly initialized.
+        * ms_start : the database is opened, but the master key is not known.
+        * ms_got_master : the database is opened with a correct master key.
+        """
+        if self.init_ok == None:
             return ms_no_cfg
-        elif self.master == null_str:
+        elif self.master == None:
             return ms_start
         else:
             return ms_got_master
         
 db = pass_db(conf_fn)
 
-                
 class master_handler(SocketServer.BaseRequestHandler):
+    """The unix socket service for pass_db.
+    """
+    
     data = ""
     fin = False
 
@@ -364,6 +398,34 @@ class master_handler(SocketServer.BaseRequestHandler):
             self.data = self.data + d
     
     def handle(self):
+        """handle input.
+        
+        messages:
+        
+        * state
+            * state: [0|1|2]
+        * version
+            * version 0.0.1
+        * check_master master_key
+            * Error: no valid config file
+            * check_master: [0|1]
+        * set_master master_key
+            * set_master: master_key
+            * Error: updating the config file failed
+            * Error: need old master key for existing passwords
+        * get_pass id
+            * Error: 'id' doesn't exist
+            * Error: no master key
+            * get_pass: %s
+        * set_pass id
+            * Error: 'id' doesn't exist
+            * Error: no master key
+            * Error: updating the config file failed
+            * set_pass: %s, %s
+        * kill
+            * kill: pid
+        * unknown_header: %s
+        """
         # [a:master:server:handle]
         while not self.fin:
             line = self.recv_line()
@@ -372,17 +434,17 @@ class master_handler(SocketServer.BaseRequestHandler):
                 self.request.sendall('state: %s\n' % self.state())
                 continue
             elif header == 'version':
-                self.request.sendall('version 0.0.1\n')
+                self.request.sendall('version: 0.0.1\n')
                 continue
             elif header == "get_pass":
                 if self.state() == ms_got_master:
                     pwd = db.get_pass(body)
-                    if pwd == null_str:
+                    if pwd == None:
                         self.request.sendall("Error: '%s' doesn't exist\n" % body)
                     else:
                         self.request.sendall("get_pass: %s\n" % pwd)
                 else:
-                    self.request.sendall("Error: no master for pass\n")
+                    self.request.sendall("Error: no master key\n")
                 continue
             elif header == "check_master":
                 if self.state() == ms_no_cfg:
@@ -396,17 +458,17 @@ class master_handler(SocketServer.BaseRequestHandler):
                     if db.write_cfg():
                         self.request.sendall("set_master: %s\n" % body)
                     else:
-                        self.request.sendall("Error: updating config file failed\n")
+                        self.request.sendall("Error: updating the config file failed\n")
                 else:
                     self.request.sendall("Error: need old master key for existing passwords\n")
                 continue
             elif header == 'set_pass':
                 pos = body.find(",")
                 if(pos <= 0):
-                    self.request.sendall("Error: bad id %s\n" % body)
+                    self.request.sendall("Error: '%s' doesn't exist\n" % body)
                     continue
                 if self.state() != ms_got_master:
-                    self.request.sendall("Error: no master key yet\n")
+                    self.request.sendall("Error: no master key\n")
                     continue
                 id = body[:pos]
                 pwd = body[pos + 1:]
@@ -414,10 +476,10 @@ class master_handler(SocketServer.BaseRequestHandler):
                 if db.write_cfg():
                     self.request.sendall("set_pass: %s, %s\n" % (id, pwd))
                 else:
-                    self.request.sendall("Error: updating config file failed\n")
+                    self.request.sendall("Error: updating the config file failed\n")
                 continue
             elif header == 'kill':
-                self.request.sendall("kill %d\n" % os.getpid())
+                self.request.sendall("kill: %d\n" % os.getpid())
                 try:
                     os.remove(unixsock)  # [FIXME]
                 except:
@@ -426,7 +488,7 @@ class master_handler(SocketServer.BaseRequestHandler):
                 break
             elif header == '':
                 continue
-            print "unknown header:'%s'" % header
+            print "unknown_header:'%s'" % header
             
 class master_server(SocketServer.ThreadingMixIn, SocketServer.UnixStreamServer):
     pass
@@ -559,7 +621,7 @@ class client:
             self.connected = False
          
 def host_hash(host):
-    assert host != null_str
+    assert host != None
     
     m = SHA256.new()
     m.update(host)
@@ -673,9 +735,9 @@ def test():
         
     # secure_replace_file(conf_fn, conf_fn+".new")
     setting = False
-    password = null_str
+    password = None
     setting_master = False
-    master = null_str
+    master = None
     kill = False
     front_server = False
     
@@ -729,7 +791,7 @@ def test():
         c.kill()
         sys.exit(0)
     # set/put master pass
-    if master != null_str:
+    if master != None:
         if setting_master:
             c.set_master(master)
         else:
