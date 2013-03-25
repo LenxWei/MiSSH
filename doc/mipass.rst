@@ -24,3 +24,4 @@ Inner methods
 .. autoclass:: mipass.pass_db
    :members: get_master_hash
    
+.. autofunction:: mipass.url_hash
