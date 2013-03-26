@@ -29,7 +29,6 @@ import sys
 
 verbose = False
 
-
 conf_fn = "~/.missh"
 conf_fn = os.path.expanduser(conf_fn)
 
@@ -43,6 +42,10 @@ critical_error = False
 
 # utility functions
 
+def setv():
+    global verbose
+    verbose=True
+    
 def kill_self():
     os.kill(os.getpid(), 9)
 
@@ -272,7 +275,7 @@ class pass_db:
         :param id: the id
         :returns: True or False
         """
-        return id.is_alnum();
+        return id.isalnum();
     
     def set_pass(self, id, pwd):
         """set password for id
@@ -418,7 +421,7 @@ class pass_db:
         else:
             return ms_got_master
         
-db = pass_db(conf_fn)
+db = None
 
 class master_handler(SocketServer.BaseRequestHandler):
     """The unix socket service for pass_db.
@@ -430,7 +433,7 @@ class master_handler(SocketServer.BaseRequestHandler):
     def state(self):
         return db.state()
     
-    def recv_line(self):
+    def _recv_line(self):
         """
         return a line without '\n' from the buffer
         """
@@ -449,12 +452,17 @@ class master_handler(SocketServer.BaseRequestHandler):
                 return s
             self.data = self.data + d
     
-    def check_error(self):
+    def _check_error(self):
         if critical_error:
-            self.request.sendall("Error: updating the config file %s failed. The password service must stop. Please check its privilege.\n" % db.fname())
+            self._send("Error: updating the config file %s failed. The password service must stop. Please check its privilege.\n" % db.fname())
             time.sleep(1)
             kill_self()
 
+    def _send(self, msg):
+        if verbose:
+            print "-> %s" % msg
+        self.request.sendall(msg)
+        
     def handle(self):
         """handle input.
         
@@ -466,7 +474,8 @@ class master_handler(SocketServer.BaseRequestHandler):
             * version 0.0.1
         * check_master master_key
             * Error: no valid config file
-            * check_master: [0|1]
+            * Error: bad master key
+            * check_master: ok
         * set_master master_key
             * set_master: master_key
             * Error: updating the config file %s failed. The password service must stop. Please check its privilege.
@@ -488,59 +497,64 @@ class master_handler(SocketServer.BaseRequestHandler):
         """
         # [a:master:server:handle]
         while not self.fin:
-            line = self.recv_line()
+            line = self._recv_line()
             header, body = get_header(line)
+            if verbose:
+                print '<- %s %s' % (header, body)
             if header == 'state':
-                self.request.sendall('state: %s\n' % self.state())
+                self._send('state: %s\n' % self.state())
                 continue
             elif header == 'version':
-                self.request.sendall('version: 0.0.1\n')
+                self._send('version: 0.0.1\n')
                 continue
             elif header == "get_pass":
                 if self.state() == ms_got_master:
                     pwd = db.get_pass(body)
                     if pwd == None:
-                        self.request.sendall("Error: '%s' doesn't exist\n" % body)
+                        self._send("Error: '%s' doesn't exist\n" % body)
                     else:
-                        self.request.sendall("get_pass: %s\n" % pwd)
+                        self._send("get_pass: %s\n" % pwd)
                 else:
-                    self.request.sendall("Error: no master key\n")
+                    self._send("Error: no master key\n")
                 continue
             elif header == "check_master":
                 if self.state() == ms_void_cfg:
-                    self.request.sendall("Error: no valid config file\n")
+                    self._send("Error: no valid config file\n")
                     continue
                 r = db.check_master(body)
-                self.request.sendall("check_master: %s\n" % str(r))
+                if r:
+                    self._send("check_master: ok\n")
+                else:
+                    self._send("Error: bad master key\n")
                 continue
             elif header == 'set_master':
                 if db.set_master(body):
                     if db.write_cfg():
-                        self.request.sendall("set_master: %s\n" % body)
+                        self._send("set_master: %s\n" % body)
                     else:
-                        self.check_error()
+                        self._check_error()
                         assert 0  # should never arrive here
                 else:
-                    self.request.sendall("Error: needs old master key for existing passwords\n")
+                    self._send("Error: needs old master key for existing passwords\n")
                 continue
             elif header == 'set_pass':
                 pos = body.find(",")
                 if(pos <= 0):
-                    self.request.sendall("Error: bad input '%s'\n" % body)
+                    self._send("Error: bad input '%s'\n" % body)
                     continue
                 if self.state() != ms_got_master:
-                    self.request.sendall("Error: no master key\n")
+                    self._send("Error: no master key\n")
                     continue
                 id = body[:pos]
                 pwd = body[pos + 1:]
                 if not db.set_pass(id, pwd):
-                    self.check_error()
-                    self.request.sendall("Error: invalid id '%s'\n" % id)
+                    self._check_error()
+                    self._send("Error: invalid id '%s'\n" % id)
                     continue
-                self.request.sendall("set_pass: %s, %s\n" % (id, pwd))
+                self._send("set_pass: %s, %s\n" % (id, pwd))
                 continue
             elif header == 'kill':
-                self.request.sendall("kill: %d\n" % os.getpid())
+                self._send("kill: %d\n" % os.getpid())
                 try:
                     os.remove(unixsock)  # [FIXME]
                 except:
@@ -559,6 +573,14 @@ def start_service(unixsock):
     
     :param unixsock: the socket file
     """
+    global db
+    db=pass_db(conf_fn)
+    
+    try:
+        os.remove(unixsock)
+    except:
+        pass
+    
     server = master_server(unixsock, master_handler)
     
     # main loop
@@ -616,7 +638,7 @@ class client:
     def __init__(self, unixsock):
         self.sock_fn = unixsock
         
-    def recv_line(self):
+    def _recv_line(self):
         '''get a line from the receive buffer.
         
         :returns: the input line
@@ -637,9 +659,10 @@ class client:
                 return s
             self.data = self.data + d
         
-    def _connect(self):
-        '''connect to the password keeping service.
+    def _connect(self, try_hard):
+        '''Connect to the password keeping service without retrying.
         '''
+
         if self.connected:
             return
         
@@ -650,7 +673,7 @@ class client:
 
             # print "get state"
             self.sock.sendall("state\n")
-            response = self.recv_line()
+            response = self._recv_line()
             state = get_resp_val(response)
             if state == str(ms_got_master):
                 self.master_status = 1
@@ -661,21 +684,21 @@ class client:
                 
             # print "resp:", response
         except Exception, err:
-            if verbose:
+            if verbose and try_hard:
                 print "Error:", str(err)
             self.sock.close()
-            if verbose:
+            if verbose and try_hard:
                 print "Error: can't connect to the password keeping service."
             self.connected = False
             pass
 
     def connect(self, try_hard=True):
-        self._connect()
+        '''Connect to the password keeping service.
+        
+        :param try_hard: True means that if connecting failed, try to start the service again and retry.
+        '''
+        self._connect(try_hard)
         if try_hard and not self.connected:
-            try:
-                os.remove(self.sock_fn)
-            except:
-                pass
             try:
                 start_service_daemon(self.sock_fn)
             except:
@@ -685,21 +708,6 @@ class client:
                 print "Error: can't connect to the master password service."
                 sys.exit(2)
 
-    def kill(self):
-        '''kill the service.
-        
-        :returns: the response.
-        '''
-        if not self.connected:
-            self.connect(False)
-        if self.connected:
-            self.sock.sendall("kill\n")
-            resp = self.recv_line()
-            self.close()
-            return resp
-        else:
-            return "no password keeping service found"
-        
     def need_master(self):
         '''test whether a master key is needed.
         
@@ -710,55 +718,86 @@ class client:
         
         return self.master_status
     
+    def kill(self):
+        '''kill the service.
+        
+        :returns: success or not, the response.
+        '''
+        if not self.connected:
+            self.connect(False)
+        if self.connected:
+            self.sock.sendall("kill\n")
+            resp = self._recv_line()
+            self.close()
+            return not is_resp_err(resp), get_resp_val(resp)
+        else:
+            return False, "no password keeping service found"
+        
     def check_master(self, master):
         '''check and set the master key.
         
         :param master: the master key.
-        :returns: the response
+        :returns: success or not, the response.
         '''
-        assert self.connected
+        global verbose
+        
+        if not self.connected:
+            self.connect()
+
         self.sock.sendall("check_master %s\n" % master)
-        resp = self.recv_line()
+        resp = self._recv_line()
+        if verbose:
+            print resp
         if not is_resp_err(resp):
             self.master_status = 1
-        return resp
+        return not is_resp_err(resp), get_resp_val(resp)
         
     def set_master(self, master):
         '''set the master key.
         
         :param master: the master key.
-        :returns: the response.
+        :returns: success or not, the response.
         '''
-        assert self.connected
+        if not self.connected:
+            self.connect()
+
         self.sock.sendall("set_master %s\n" % master)
-        resp = self.recv_line()
+        resp = self._recv_line()
         if not is_resp_err(resp):
             self.master_status = 1
-        return resp
+        return not is_resp_err(resp), get_resp_val(resp)
         
     def set_pass(self, url, password):
         '''set the password for url.
         
         :param url: the service.
         :param password: the password.
-        :returns: the response.
+        :returns: success or not, the response.
         '''
-        assert self.connected
+        if not self.connected:
+            self.connect()
+
         self.sock.sendall("set_pass %s,%s\n" % (url_hash(url), password))
-        resp = self.recv_line()
+        resp = self._recv_line()
         # print "set_pass, resp:", resp
-        return resp
+        return not is_resp_err(resp), get_resp_val(resp)
         
     def get_pass(self, url):
         '''get the password.
         
         :param url: url of the service.
-        :returns: the response.
+        :returns: success or not, the response.
         '''
-        assert self.connected
+        global verbose
+        
+        if not self.connected:
+            self.connect()
+
         self.sock.sendall("get_pass %s\n" % url_hash(url))
-        resp = self.recv_line()
-        return resp
+        resp = self._recv_line()
+        if verbose:
+            print resp
+        return not is_resp_err(resp), get_resp_val(resp)
     
         # print "get_pass, resp:", resp
         # if resp.startswith("get_pass: "):
@@ -775,52 +814,4 @@ class client:
             except:
                 pass
             self.connected = False
-         
-# interface for other modules
-# [a:login:get_password]
-def get_password(host):
-    c = client(unixsock)
-    c.connect()  # should get status, and then determine whether to require the master key
-    # [a:login:get_password:connect]
-        
-    if not c.got_master:
-        # [a:login:get_password:ask master]
-        # ask master password
-        import getpass
-        master_pwd = getpass.getpass("master password:")
-        c.check_master(master_pwd)
-        # [FIXME]
-
-        if not c.got_master:
-            print "Error: no correct master password."
-            sys.exit(1)
-                
-    if verbose:
-        print "host hash is", url_hash(host)
-    resp = c.get_pass(host)
-    if not is_resp_err(resp):
-        pwd = get_resp_val(resp)
-    else:
-        pwd = None
-    c.close()
-    return pwd
-        
-def update_password(host, pwd):
-    c = client(unixsock)
-    c.connect()  # should get status, and then determine whether to require the master key
-        
-    if not c.got_master:
-        # ask master password
-        import getpass
-        master_pwd = getpass.getpass("master password:")
-        c.check_master(master_pwd)
-        # [FIXME]
-
-        if not c.got_master:
-            print "Error: no correct master password."
-            sys.exit(2)
-                
-    if verbose:
-        print "host hash is", url_hash(host)
-    c.set_pass(host, pwd)
-    c.close()
+ 
