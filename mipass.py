@@ -44,7 +44,7 @@ critical_error = False
 
 def setv():
     global verbose
-    verbose=True
+    verbose = True
     
 def kill_self():
     os.kill(os.getpid(), 9)
@@ -214,6 +214,8 @@ class pass_db:
         read configuration from file
         '''
         line_cnt = 0
+        if not os.path.exists(self.fn):
+            return
         try:
             f = open(self.fn)
             for line in f:
@@ -331,8 +333,10 @@ class pass_db:
                 new_pass[i] = mi_encrypt(self.seq, mi_decrypt(self.password_enc[i], self.master), master)
             
             self.master = master
+            self.master_hash = self.get_master_hash(master)
             self.password_enc = new_pass
-        
+            self.init_ok = True
+            
             return self.write_cfg()
         
     def check_master(self, master):
@@ -393,9 +397,10 @@ class pass_db:
         try:
             os.rename(self.fn, old_fn)
         except:
-            print "Error: can't rotate %s" % self.fn
-            critical_error = True
-            return False
+            # print "Error: can't rotate %s" % self.fn
+            # critical_error = True
+            # return False
+            pass
         
         try:
             os.rename(new_fn, self.fn)
@@ -414,7 +419,7 @@ class pass_db:
         * ms_start : the database is opened, but the master key is not known.
         * ms_got_master : the database is opened with a correct master key.
         """
-        if self.init_ok == None:
+        if self.init_ok == False:
             return ms_void_cfg
         elif self.master == None:
             return ms_start
@@ -574,7 +579,7 @@ def start_service(unixsock):
     :param unixsock: the socket file
     """
     global db
-    db=pass_db(conf_fn)
+    db = pass_db(conf_fn)
     
     try:
         os.remove(unixsock)
