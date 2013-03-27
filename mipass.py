@@ -1,19 +1,21 @@
 #!/usr/bin/env python
 
-# a server provides password cache and lookup service
-# depend on pycrypto, python-daemon
-
-# password format:
-# id_md5_hashed_and_hex = seq,pass_aes_encrypted_by_master_key_and_hex
-# hex: binascii.b2a_hex(s)
-# seq is used to generate the IV, sha256 using the master key
-
-# master key:
-# master = maseter_key_md5_first_4_bytes_and_hex
-
 '''A password keeping service.
 
 .. moduleauthor:: Lenx Wei <lenx.wei@gmail.com>
+
+A server provides password cache and lookup service.
+Depending on pycrypto, python-daemon
+
+Password format::
+
+ id_md5_hashed_and_hex = seq,pass_aes_encrypted_by_master_key_and_hex
+ hex: binascii.b2a_hex(s)
+ seq is used to generate the IV, sha256 using the master key
+
+master key::
+
+ master = maseter_key_md5_first_1.5_bytes_and_hex
 '''
 
 from Crypto.Hash import MD5, SHA256
@@ -142,7 +144,7 @@ def mi_decrypt(enc, key):
         print str(err)
         return None
     
-    return plain.lstrip('\n')
+    return plain.rstrip('\n')
 
 def mi_encrypt(seq, plain, key):
     """encrypt a plain password.
@@ -260,7 +262,7 @@ class pass_db:
         
         algorithm::
         
-           hex(MD5(master))[:8]
+           hex(MD5(master))[:3]
         
         :param master: the master key
         :returns: the hash   
@@ -269,7 +271,7 @@ class pass_db:
         
         m = MD5.new()
         m.update(master)
-        return m.hexdigest()[:8]
+        return m.hexdigest()[:3]
         
     def check_id(self, id):
         """validate an id that it should only contain alpha or number characters.
@@ -736,7 +738,7 @@ class client:
             self.close()
             return not is_resp_err(resp), get_resp_val(resp)
         else:
-            return False, "no password keeping service found"
+            return False, "No password keeping service found."
         
     def check_master(self, master):
         '''check and set the master key.

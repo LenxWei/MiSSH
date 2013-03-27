@@ -8,7 +8,7 @@
 import os
 import time 
 import sys
-from mipass import *
+import mipass
         
 def usage():
     print """Test usage:
@@ -56,14 +56,13 @@ def test():
         elif o == '-d':
             front_server = True
         elif o == '-v':
-            setv()
-            verbose=True # why do I need to assign twice ?!
+            mipass.verbose=True # why do I need to assign twice ?!
         else:
             print "unhandled option:", o,a
             usage()
             sys.exit(2)
     
-    c = client(unixsock)
+    c = mipass.client(mipass.unixsock)
 
     # check whether the service is started
     if(front_server):
@@ -75,7 +74,7 @@ def test():
             pass
 
         print "The password keeping service starts..."
-        start_service(unixsock)
+        mipass.start_service(mipass.unixsock)
         return
     
     if kill:

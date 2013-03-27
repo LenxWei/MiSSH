@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import npyscreen
 import sys
+import os
 import pexpect
 import getopt
 import mipass
@@ -76,13 +77,14 @@ def get_key_val(line):
 
 class missh_cfg:
     fn = ""
-    def __init__(self, fn):
+    def __init__(self, fn, new=False):
         self.fn = fn
         self.host = None
         self.opt = []
         self.fwd = 0
-        self.read_cfg()
-        
+        if not new:
+            self.read_cfg()
+            
     def cmdline(self):
         o = []
         for i in self.opt:
@@ -152,31 +154,33 @@ class missh_cfg:
         
 
 def usage():
-    print "missh 0.1 by LenX"
+    print "missh 0.1 by LenX (lenx.wei@gmail.com)"
     print """Usage:
 missh [opt] [file_path]
-   -o      open or create a session file
+   -o      open a session file
+   -n      create a new session file
    -c      edit or view missh's configuration file
    -k      kill all background missh processes
    -h      show help informatioin
    -v      verbose mode
 """
+    sys.exit(2)
 
 def main():
     # parse arguments
-    fn = ""
+    fn = "" 
     conf = ""
     kill = False
     
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hvocC:k")
+        opts, args = getopt.getopt(sys.argv[1:], "hvnocC:k")
     except getopt.GetoptError as err:
         print str(err)  # will print something like "option -a not recognized"
         usage()
-        sys.exit(2)
     
     edit = False
     kill = False
+    create = False
     
     for o, a in opts:
         if o == "-v":
@@ -186,18 +190,23 @@ def main():
             sys.exit()
         elif o == "-o":
             edit = True
-            if(fn != ""):
-                usage()
-                sys.exit(2)
+        elif o == '-n':
+            edit = True
+            create = True
         elif o == '-k':
             kill = True
         else:
-            print "Error: bad options - ( %s : %s )" % (o, a)  # will print something like "option -a not recognized"
+            print "Error: bad options - ( %s : %s )" % (o, a)
             usage()
-            sys.exit(2)
+
+    c=mipass.client(mipass.unixsock)
 
     if kill:
-        mipass.kill()
+        ok, resp=c.kill()
+        if ok:
+            print "The service is stopped."
+        else:
+            print resp
         sys.exit(0)
     
     if(len(args) == 1):
@@ -206,15 +215,56 @@ def main():
         usage()
         sys.exit(2)
 
+    if edit and not os.path.exists(fn):
+        print "Session file is not found:",fn
+        sys.exit(1)
+    
+    if create and os.path.exists(fn):
+        s=raw_input("Session file exists. Are you going to rewrite it? [y/n]")
+        if s.lower()=='y' or s.lower()=='yes':
+            pass
+        else:
+            sys.exit(1)
+
+    c.connect()
+
+    # get pwd
+    if c.need_master()==-2:
+        import getpass
+        while 1:
+            master_pwd = getpass.getpass("Create the master password:")
+            master_pwd2 = getpass.getpass("Please repeat it:")
+            if master_pwd == master_pwd2:
+                break
+            print "They are not matched!"
+        ok, resp = c.set_master(master_pwd)
+        if not ok:
+            print "Can't set the master key. Error:",resp
+            sys.exit(1)
+            
+    elif c.need_master()== -1:
+        import getpass
+        while 1:
+            master_pwd = getpass.getpass("Input the master password:")
+            ok, resp = c.check_master(master_pwd)
+            print ok, resp
+            if not ok:
+                print "Please try again. Error:",resp
+            else:
+                break
+        
     # parse msh file
     connect = True
-    cfg = missh_cfg(fn)
-    # get pwd
+    cfg = missh_cfg(fn, create)
         
     # [a:login:main:get_password]
-    pwd = mipass.get_password(cfg.host)
+    ok, pwd = c.get_pass(cfg.host)
+    
+    if not ok:
+        pwd=""
+    
     if mipass.verbose:
-        print "password:", pwd
+        print "Password:", pwd
     
     # show dialog if needed
     # todo: verbose mode
@@ -225,10 +275,10 @@ def main():
         # update config
         if connect:
             cfg.update(App.host.value, App.options.value.split('\n'), App.forward_only.value)
+            # update pwd
             if pwd != App.password.value:
                 pwd = App.password.value
-                mipass.update_password(cfg.host, pwd)
-        # update pwd
+                c.set_pass(cfg.host, pwd)
         
     # connect to ssh
     if connect:

@@ -1,6 +1,5 @@
-===================================
 mipass - a password keeping service
-===================================
+***********************************
 
 password encryption
 ===================
@@ -19,8 +18,13 @@ socket server
 .. autoclass :: mipass.master_handler
    :members:
 
+socket client
+=============
+.. autoclass :: mipass.client
+   :members:
+
 Inner methods
--------------
+=============
 .. autoclass:: mipass.pass_db
    :members: get_master_hash
    
