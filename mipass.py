@@ -9,13 +9,14 @@ Depending on pycrypto, python-daemon
 
 Password format::
 
- id_md5_hashed_and_hex = seq,pass_aes_encrypted_by_master_key_and_hex
- hex: binascii.b2a_hex(s)
- seq is used to generate the IV, sha256 using the master key
+ id_md5_hashed_and_hex = rnd,pass_aes_encrypted_by_master_key1_and_hex
+ rnd is used to generate the IV, sha256 using the master key1
 
 master key::
 
- master = maseter_key_md5_first_1.5_bytes_and_hex
+ master_hash = rnd,(rnd,maseter_key2)_md5_first_2_bytes_and_hex
+ master key1 = sha256(master key)^1024
+ master key2 = sha256(master key)^2048
 '''
 
 from Crypto.Hash import MD5, SHA256
@@ -28,6 +29,7 @@ import SocketServer
 import os
 import time 
 import sys
+import random
 
 verbose = False
 
@@ -44,9 +46,8 @@ critical_error = False
 
 # utility functions
 
-def setv():
-    global verbose
-    verbose = True
+def rand():
+    return str(random.randrange(2**32))
     
 def kill_self():
     os.kill(os.getpid(), 9)
@@ -97,18 +98,15 @@ def get_header(s):
 def mi_getseq(enc):
     pos = enc.find(',')
     if pos >= 0:
-        try:
-            seq = int(enc[:pos])
-            return seq
-        except:
-            pass
+        seq = enc[:pos]
+        return seq
     print "bad seq:", enc
     return 0
 
 def gen_AES_param(seq, key):
     m = SHA256.new(key)
     k = m.digest()  # 32bytes
-    m.update(str(seq))
+    m.update(seq)
     iv = m.digest()[:16]
     return k, iv
 
@@ -122,10 +120,7 @@ def mi_decrypt(enc, key):
     seq = None
     pos = enc.find(',')
     if pos >= 0:
-        try:
-            seq = int(enc[:pos])
-        except:
-            pass
+        seq = enc[:pos]
     if seq == None:
         print "bad seq:", enc
         return None
@@ -152,12 +147,12 @@ def mi_encrypt(seq, plain, key):
     algorithm::
 
        key1 = SHA256(key)
-       iv = SHA256(key, str(seq))
+       iv = SHA256(key, seq)
        body = plain padded using '\\n' to be aligned with 32bytes
        enc = AES.CBC(body, key1, iv)
        encrypted password = seq,enc
     
-    :param seq: a number, used to generate the IV
+    :param seq: a rand string, used to generate the IV
     :param plain: the plain password
     :param key: a string, as the key
     :returns: the encrypted password
@@ -167,14 +162,14 @@ def mi_encrypt(seq, plain, key):
     
     body = plain + '\n' * (32 - (len(plain) - 1) % 32 - 1)
     enc = obj.encrypt(body)
-    return "%d,%s" % (seq, b2a_hex(enc))
+    return "%s,%s" % (seq, b2a_hex(enc))
 
 def get_seq(s):
     p = s.find(",")
     if(p > 0):
-        return int(s[:p]), s[p + 1:]
+        return s[:p], s[p + 1:]
     else:
-        return 0, s[p + 1:]
+        return "", s[p + 1:]
     
 ms_start = 0
 ms_got_master = 1
@@ -189,10 +184,10 @@ class pass_db:
     '''
     fn = None
     master = None
+    master1 = None
     master_hash = None
     master_lock = None
     password_enc = {}  # id:pass, as in file
-    seq = 0  # for IV
     timeout = 120  # in min
     init_ok = False
     
@@ -240,9 +235,6 @@ class pass_db:
                     elif(key == ""):
                         raise "no key"
                     else:
-                        seq, enc = get_seq(val)
-                        if(self.seq < seq):
-                            self.seq = seq
                         self.password_enc[key] = val
                 except:
                     print "error config line #%d : %s" % (line_cnt, line)
@@ -255,7 +247,7 @@ class pass_db:
             print "bad configuration file:", self.fn
             return
         
-    def get_master_hash(self, master):
+    def get_master_hash(self, master, old=None):
         '''master hash.
         
         only store master_hash in cfg.
@@ -265,13 +257,23 @@ class pass_db:
            hex(MD5(master))[:3]
         
         :param master: the master key
-        :returns: the hash   
+        :returns: the master1 key, the hash   
         '''
         assert master != None
         
-        m = MD5.new()
-        m.update(master)
-        return m.hexdigest()[:3]
+        m = SHA256.new()
+        if old!=None:
+            seq = get_seq(old)
+        else:
+            seq = rand()
+        m.upate(seq)
+        
+        for i in xrange(1024):
+            m.update(master)
+        master1=m.digest()
+        for i in xrange(1024):
+            m.update(master)
+        return master1, seq+","+m.hexdigest()[:4]
         
     def check_id(self, id):
         """validate an id that it should only contain alpha or number characters.
@@ -294,9 +296,8 @@ class pass_db:
         if not self.check_id(id):
             return False
         
-        self.seq = self.seq + 1
         with self.master_lock:
-            self.password_enc[id] = mi_encrypt(self.seq, pwd, self.master)
+            self.password_enc[id] = mi_encrypt(rand(), pwd, self.master1)
         return self.write_cfg()
         
     def get_pass(self, id):
@@ -329,13 +330,14 @@ class pass_db:
         if len(self.password_enc) > 0 and self.master == None:
             return False
         
+        master1, master_hash=self.get_master_hash(master)
         with self.master_lock:
             for i in self.password_enc:
-                self.seq = self.seq + 1
-                new_pass[i] = mi_encrypt(self.seq, mi_decrypt(self.password_enc[i], self.master), master)
+                new_pass[i] = mi_encrypt(rand(), mi_decrypt(self.password_enc[i], self.master1), master1)
             
             self.master = master
-            self.master_hash = self.get_master_hash(master)
+            self.master = master1
+            self.master_hash = master_hash
             self.password_enc = new_pass
             self.init_ok = True
             
@@ -351,8 +353,11 @@ class pass_db:
         '''
         
         with self.master_lock:
-            if self.master_hash == None or (self.get_master_hash(master) == self.master_hash):
+            master1, master_hash = self.get_master_hash(master, self.master_hash)
+            if self.master_hash == None or master_hash == self.master_hash:
                 self.master = master
+                self.master1=master1
+                self.master_hash=self.get_master_hash(master)
                 return 1
             return 0
             
