@@ -17,6 +17,8 @@ default_opt = \
 % forward remote port to local port
 % -R 8080"""
     
+c=None
+
 class MisshApp(npyscreen.NPSApp):
     def __init__(self, fn, host, password, opt, fwd):
         self.fn = fn
@@ -30,6 +32,7 @@ class MisshApp(npyscreen.NPSApp):
 
         F = npyscreen.ActionForm(name="MiSSH - " + self.fn)
         F.on_ok = self.on_ok
+        F.while_editing = self.on_switch
         
         self.host = F.add(npyscreen.TitleText, name="Host:", value=self.hostn)
 #        self.port = F.add(npyscreen.TitleText, name = "Port:", value=self.portn )
@@ -46,6 +49,12 @@ class MisshApp(npyscreen.NPSApp):
         return "%s # %s @%s\n%s" % (self.host.value, self.password.value,
                                      self.forward_only.value, self.options.value)
 
+    def on_switch(self):
+        if self.host.value != self.hostn:
+            ok, pwd=c.get_pass(self.host.value)
+            if ok:
+                self.password.value=pwd
+    
     def on_ok(self):
         self.connect = True
 
@@ -53,15 +62,18 @@ class MisshCfg(npyscreen.NPSApp):
     def main(self):
         F = npyscreen.ActionForm(name="MiSSH Configuration",)
         self.main_password = F.add(npyscreen.TitlePassword, name="Main password:")
-        self.timeout = F.add(npyscreen.TitleText, name="Password cache timeout (in minutes, 0 means no cache):",
-                             value="30")
-        
+        self.timeout = F.add(npyscreen.TitleText, name="Password cache timeout (in minutes):",
+                             value="120")
+        self.save = False
         # This lets the user play with the Form.
         F.edit()
     
     def __str__(self):
         return "%s:%s" % (self.main_password, self.timeout)
 
+    def on_ok(self):
+        self.save = True
+        
 def remove_remark(line):
     pos = line.find("#")
     if(pos >= 0):
@@ -167,6 +179,7 @@ missh [opt] [file_path]
     sys.exit(2)
 
 def main():
+    global c
     # parse arguments
     fn = "" 
     conf = ""
@@ -260,6 +273,7 @@ def main():
     # [a:login:main:get_password]
     if create:
         pwd=""
+        cfg.opt=default_opt.split('\n')
     else:
         ok, pwd = c.get_pass(cfg.host)
         
