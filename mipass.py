@@ -183,7 +183,6 @@ class pass_db:
     Notice: use self.master_lock to keep threading safety.
     '''
     fn = None
-    master = None
     master1 = None
     master_hash = None
     master_lock = None
@@ -263,10 +262,10 @@ class pass_db:
         
         m = SHA256.new()
         if old!=None:
-            seq = get_seq(old)
+            seq = get_seq(old)[0]
         else:
             seq = rand()
-        m.upate(seq)
+        m.update(seq)
         
         for i in xrange(1024):
             m.update(master)
@@ -292,7 +291,7 @@ class pass_db:
         :param pwd: the new password
         :returns: True if succeeds, False otherwise
         """
-        assert self.master != None
+        assert self.master1 != None
         if not self.check_id(id):
             return False
         
@@ -303,40 +302,40 @@ class pass_db:
     def get_pass(self, id):
         """get password of id
         
-        self.master should be valid.
+        self.master1 should be valid.
         
         :param id: the user id
         :returns: the password, None if not existed
         """
         
-        assert self.master != None
+        assert self.master1 != None
         
         with self.master_lock:
             enc = self.password_enc.get(id)
             if enc != None:
-                return mi_decrypt(enc, self.master)
+                return mi_decrypt(enc, self.master1)
             return None
     
     def set_master(self, master):
         """set a new master key.
         
-        self.master should be valid when some passwords already exist.
+        self.master1 should be valid when some passwords already exist.
         
         :param master: the new master key
         :returns: True if succeeds, False otherwise
         """
         
         new_pass = {}
-        if len(self.password_enc) > 0 and self.master == None:
+        if len(self.password_enc) > 0 and self.master1 == None:
             return False
         
         master1, master_hash=self.get_master_hash(master)
         with self.master_lock:
             for i in self.password_enc:
                 new_pass[i] = mi_encrypt(rand(), mi_decrypt(self.password_enc[i], self.master1), master1)
+                print new_pass[i]
             
-            self.master = master
-            self.master = master1
+            self.master1 = master1
             self.master_hash = master_hash
             self.password_enc = new_pass
             self.init_ok = True
@@ -355,7 +354,6 @@ class pass_db:
         with self.master_lock:
             master1, master_hash = self.get_master_hash(master, self.master_hash)
             if self.master_hash == None or master_hash == self.master_hash:
-                self.master = master
                 self.master1=master1
                 self.master_hash=self.get_master_hash(master)
                 return 1
@@ -367,7 +365,7 @@ class pass_db:
         using two files to replace each other, in order to control the potential leakage.
         '''
         
-        if(self.master == None):
+        if(self.master_hash == None):
             print "Error: can't write cfg without a master password"
             return False
         
@@ -387,7 +385,7 @@ class pass_db:
                     f = open(new_fn, 'wb')
                 f.write("# don't edit this file manually. please use 'missh -c'.\n")
                 f.write("timeout = %d\n" % self.timeout)
-                f.write("master = %s\n" % self.get_master_hash(self.master))
+                f.write("master = %s\n" % self.master_hash)
                 f.write("\n")
                 for i in self.password_enc:
                     f.write("%s = %s\n" % (i, self.password_enc[i]))
@@ -428,7 +426,7 @@ class pass_db:
         """
         if self.init_ok == False:
             return ms_void_cfg
-        elif self.master == None:
+        elif self.master1 == None:
             return ms_start
         else:
             return ms_got_master

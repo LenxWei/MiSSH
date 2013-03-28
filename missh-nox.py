@@ -215,7 +215,7 @@ def main():
         usage()
         sys.exit(2)
 
-    if edit and not os.path.exists(fn):
+    if edit and not os.path.exists(fn) and not create:
         print "Session file is not found:",fn
         sys.exit(1)
     
@@ -258,10 +258,13 @@ def main():
     cfg = missh_cfg(fn, create)
         
     # [a:login:main:get_password]
-    ok, pwd = c.get_pass(cfg.host)
-    
-    if not ok:
+    if create:
         pwd=""
+    else:
+        ok, pwd = c.get_pass(cfg.host)
+        
+        if not ok:
+            pwd=""
     
     if mipass.verbose:
         print "Password:", pwd
