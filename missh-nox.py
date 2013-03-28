@@ -228,9 +228,13 @@ def main():
         App.run()
         if App.save:
             try:
-                db.timeout = int(App.timeout.value)
+                timeout = int(App.timeout.value)
             except:
-                pass
+                timeout = -1
+            if timeout > 0:
+                db.timeout = timeout
+            else:
+                print "Bad timeout:", App.timeout.value
             db.write_cfg()
         sys.exit(0)
     
