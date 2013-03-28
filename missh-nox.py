@@ -54,22 +54,29 @@ class MisshApp(npyscreen.NPSApp):
             ok, pwd=c.get_pass(self.host.value)
             if ok:
                 self.password.value=pwd
+            self.hostn=self.host.value
     
     def on_ok(self):
         self.connect = True
 
 class MisshCfg(npyscreen.NPSApp):
+    def __init__(self, to):
+        self.timeoutn=to
+        
     def main(self):
+        npyscreen.setTheme(npyscreen.Themes.TransparentThemeDarkText)
+
         F = npyscreen.ActionForm(name="MiSSH Configuration",)
-        self.main_password = F.add(npyscreen.TitlePassword, name="Main password:")
+#        self.main_password = F.add(npyscreen.TitlePassword, name="Main password:")
         self.timeout = F.add(npyscreen.TitleText, name="Password cache timeout (in minutes):",
-                             value="120")
+                             value=str(self.timeoutn))
         self.save = False
+        F.on_ok = self.on_ok
         # This lets the user play with the Form.
         F.edit()
     
     def __str__(self):
-        return "%s:%s" % (self.main_password, self.timeout)
+        return "%s" % (self.timeout.value)
 
     def on_ok(self):
         self.save = True
@@ -173,7 +180,7 @@ missh [opt] [file_path]
    -n      create a new session file
    -c      edit or view missh's configuration file
    -k      kill all background missh processes
-   -h      show help informatioin
+   -h      show help information
    -v      verbose mode
 """
     sys.exit(2)
@@ -186,7 +193,7 @@ def main():
     kill = False
     
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hvnocC:k")
+        opts, args = getopt.getopt(sys.argv[1:], "hvnock")
     except getopt.GetoptError as err:
         print str(err)  # will print something like "option -a not recognized"
         usage()
@@ -194,6 +201,7 @@ def main():
     edit = False
     kill = False
     create = False
+    edit_cfg = False
     
     for o, a in opts:
         if o == "-v":
@@ -208,10 +216,24 @@ def main():
             create = True
         elif o == '-k':
             kill = True
+        elif o == '-c':
+            edit_cfg = True
         else:
             print "Error: bad options - ( %s : %s )" % (o, a)
             usage()
 
+    if edit_cfg:
+        db=mipass.pass_db(mipass.conf_fn)
+        App=MisshCfg(db.timeout)
+        App.run()
+        if App.save:
+            try:
+                db.timeout = int(App.timeout.value)
+            except:
+                pass
+            db.write_cfg()
+        sys.exit(0)
+    
     c=mipass.client(mipass.unixsock)
 
     if kill:
