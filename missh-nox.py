@@ -17,7 +17,7 @@ default_opt = \
 % forward remote port to local port
 % -R 8080"""
     
-c=None
+c = None
 
 class MisshApp(npyscreen.NPSApp):
     def __init__(self, fn, host, password, opt, fwd):
@@ -51,32 +51,34 @@ class MisshApp(npyscreen.NPSApp):
 
     def on_switch(self):
         if self.host.value != self.hostn:
-            ok, pwd=c.get_pass(self.host.value)
+            ok, pwd = c.get_pass(self.host.value)
             if ok:
-                self.password.value=pwd
-            self.hostn=self.host.value
+                self.password.value = pwd
+                self.passwordn = pwd
+            self.hostn = self.host.value
     
     def on_ok(self):
         self.connect = True
 
 class MisshCfg(npyscreen.NPSApp):
-    def __init__(self, to):
-        self.timeoutn=to
+    def __init__(self, master, to):
+        self.mastern = master
+        self.timeoutn = to
         
     def main(self):
         npyscreen.setTheme(npyscreen.Themes.TransparentThemeDarkText)
 
         F = npyscreen.ActionForm(name="MiSSH Configuration",)
-#        self.main_password = F.add(npyscreen.TitlePassword, name="Main password:")
+        self.master = F.add(npyscreen.TitlePassword, name="Master password:", value=self.mastern)
         self.timeout = F.add(npyscreen.TitleText, name="Password cache timeout (in minutes):",
-                             value=str(self.timeoutn))
+                             value=self.timeoutn)
         self.save = False
         F.on_ok = self.on_ok
         # This lets the user play with the Form.
         F.edit()
     
     def __str__(self):
-        return "%s" % (self.timeout.value)
+        return "%s %s" % (self.master.value, self.timeout.value)
 
     def on_ok(self):
         self.save = True
@@ -171,6 +173,31 @@ class missh_cfg:
         
         # import password
         
+def get_master(c, force=False):
+    if c.need_master() == -2:
+        import getpass
+        while 1:
+            master_pwd = getpass.getpass("Create the master password:")
+            master_pwd2 = getpass.getpass("Please repeat it:")
+            if master_pwd == master_pwd2:
+                break
+            print "They are not matched!"
+        ok, resp = c.set_master(master_pwd)
+        if not ok:
+            print "Can't set the master key. Error:", resp
+            sys.exit(1)
+        return master_pwd
+            
+    elif force or c.need_master() == -1:
+        import getpass
+        while 1:
+            master_pwd = getpass.getpass("Input the master password:")
+            ok, resp = c.check_master(master_pwd)
+            if not ok:
+                print "Please try again. Error:", resp
+            else:
+                return master_pwd
+    return None
 
 def usage():
     print "missh 0.1 by LenX (lenx.wei@gmail.com)"
@@ -222,9 +249,15 @@ def main():
             print "Error: bad options - ( %s : %s )" % (o, a)
             usage()
 
+    c = mipass.client(mipass.unixsock)
+
     if edit_cfg:
-        db=mipass.pass_db(mipass.conf_fn)
-        App=MisshCfg(db.timeout)
+        c.connect()
+        master_pwd = get_master(c, True)
+        ok, to = c.get_timeout()
+        if not ok:
+            to = 120
+        App = MisshCfg(master_pwd, to)
         App.run()
         if App.save:
             try:
@@ -232,16 +265,16 @@ def main():
             except:
                 timeout = -1
             if timeout > 0:
-                db.timeout = timeout
+                if str(timeout) != to:
+                    c.set_timeout(timeout)
             else:
                 print "Bad timeout:", App.timeout.value
-            db.write_cfg()
+            if App.master.value != master_pwd:
+                c.set_master(App.master.value)
         sys.exit(0)
     
-    c=mipass.client(mipass.unixsock)
-
     if kill:
-        ok, resp=c.kill()
+        ok, resp = c.kill()
         if ok:
             print "The service is stopped."
         else:
@@ -255,56 +288,32 @@ def main():
         sys.exit(2)
 
     if edit and not os.path.exists(fn) and not create:
-        print "Session file is not found:",fn
+        print "Session file is not found:", fn
         sys.exit(1)
     
     if create and os.path.exists(fn):
-        s=raw_input("Session file exists. Are you going to rewrite it? [y/n]")
-        if s.lower()=='y' or s.lower()=='yes':
+        s = raw_input("Session file exists. Are you going to rewrite it? [y/n]")
+        if s.lower() == 'y' or s.lower() == 'yes':
             pass
         else:
             sys.exit(1)
 
     c.connect()
-
-    # get pwd
-    if c.need_master()==-2:
-        import getpass
-        while 1:
-            master_pwd = getpass.getpass("Create the master password:")
-            master_pwd2 = getpass.getpass("Please repeat it:")
-            if master_pwd == master_pwd2:
-                break
-            print "They are not matched!"
-        ok, resp = c.set_master(master_pwd)
-        if not ok:
-            print "Can't set the master key. Error:",resp
-            sys.exit(1)
-            
-    elif c.need_master()== -1:
-        import getpass
-        while 1:
-            master_pwd = getpass.getpass("Input the master password:")
-            ok, resp = c.check_master(master_pwd)
-            print ok, resp
-            if not ok:
-                print "Please try again. Error:",resp
-            else:
-                break
-        
+    get_master(c)
+    
     # parse msh file
     connect = True
     cfg = missh_cfg(fn, create)
         
     # [a:login:main:get_password]
     if create:
-        pwd=""
-        cfg.opt=default_opt.split('\n')
+        pwd = ""
+        cfg.opt = default_opt.split('\n')
     else:
         ok, pwd = c.get_pass(cfg.host)
         
         if not ok:
-            pwd=""
+            pwd = ""
     
     if mipass.verbose:
         print "Password:", pwd
@@ -321,6 +330,7 @@ def main():
             # update pwd
             if pwd != App.password.value:
                 pwd = App.password.value
+            if App.passwordn != pwd:
                 c.set_pass(cfg.host, pwd)
         
     # connect to ssh

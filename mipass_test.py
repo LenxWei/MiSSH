@@ -69,7 +69,7 @@ def test():
         c.kill()
         
         try:
-            os.remove(unixsock)
+            os.remove(mipass.unixsock)
         except:
             pass
 

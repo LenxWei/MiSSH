@@ -15,8 +15,8 @@ Password format::
 master key::
 
  master_hash = rnd,(rnd,maseter_key2)_md5_first_2_bytes_and_hex
- master key1 = sha256(master key)^1024
- master key2 = sha256(master key)^2048
+ master key1 = sha256(rand, master key)^1024
+ master key2 = sha256(rand, master key)^1032
 '''
 
 from Crypto.Hash import MD5, SHA256
@@ -40,6 +40,7 @@ unixsock = "~/.missh.sock"
 unixsock = os.path.expanduser(unixsock)
 
 server = 0
+ti = None
 
 # if critical_error is True, the server must exit after informing the clients.
 critical_error = False
@@ -47,9 +48,11 @@ critical_error = False
 # utility functions
 
 def rand():
-    return str(random.randrange(2**32))
+    return str(random.randrange(2 ** 32))
     
 def kill_self():
+    os.remove(unixsock)
+    # sys.exit(0)
     os.kill(os.getpid(), 9)
 
 def remove_remark(line):
@@ -157,6 +160,9 @@ def mi_encrypt(seq, plain, key):
     :param key: a string, as the key
     :returns: the encrypted password
     """
+    if plain == None:
+        print "null password"
+        return "0,"
     k, iv = gen_AES_param(seq, key)
     obj = AES.new(k, AES.MODE_CBC, iv)
     
@@ -261,18 +267,19 @@ class pass_db:
         assert master != None
         
         m = SHA256.new()
-        if old!=None:
+        if old != None:
             seq = get_seq(old)[0]
         else:
             seq = rand()
         m.update(seq)
+        m.update(master)
         
-        for i in xrange(1024):
-            m.update(master)
-        master1=m.digest()
-        for i in xrange(1024):
-            m.update(master)
-        return master1, seq+","+m.hexdigest()[:4]
+        for i in xrange(1023):
+            m.update(m.digest())
+        master1 = m.digest()
+        for i in xrange(8):
+            m.update(m.digest())
+        return master1, seq + "," + m.hexdigest()[:4]
         
     def check_id(self, id):
         """validate an id that it should only contain alpha or number characters.
@@ -329,7 +336,7 @@ class pass_db:
         if len(self.password_enc) > 0 and self.master1 == None:
             return False
         
-        master1, master_hash=self.get_master_hash(master)
+        master1, master_hash = self.get_master_hash(master)
         with self.master_lock:
             for i in self.password_enc:
                 new_pass[i] = mi_encrypt(rand(), mi_decrypt(self.password_enc[i], self.master1), master1)
@@ -354,8 +361,8 @@ class pass_db:
         with self.master_lock:
             master1, master_hash = self.get_master_hash(master, self.master_hash)
             if self.master_hash == None or master_hash == self.master_hash:
-                self.master1=master1
-                self.master_hash=self.get_master_hash(master)
+                self.master1 = master1
+                self.master_hash = master_hash
                 return 1
             return 0
             
@@ -501,12 +508,24 @@ class master_handler(SocketServer.BaseRequestHandler):
             * Error: updating the config file %s failed. The password service must stop. Please check its privilege.
             * Error: invalid id '%s'
             * set_pass: %s, %s
+        * get_timeout
+            * get_timeout: %d
+        * set_timeout %d
+            * Error: bad timeout '%d'
+            * set_timeout: %d
         * kill
             * kill: pid
         * unknown_header: %s
         """
         # [a:master:server:handle]
+        global ti
         while not self.fin:
+            if ti != None:
+                ti.cancel()
+            ti = threading.Timer(db.timeout * 60, kill_self)
+            ti.start()
+            if verbose:
+                print "to ", db.timeout
             line = self._recv_line()
             header, body = get_header(line)
             if verbose:
@@ -516,6 +535,23 @@ class master_handler(SocketServer.BaseRequestHandler):
                 continue
             elif header == 'version':
                 self._send('version: 0.0.1\n')
+                continue
+            if header == 'get_timeout':
+                self._send('get_timeout: %d\n' % db.timeout)
+                continue
+            if header == 'set_timeout':
+                try:
+                    to = int(body)
+                except:
+                    to = -1
+                    
+                if to <= 0:
+                    self._send('Error: bad timeout %s\n' % body)
+                else:
+                    if db.timeout != to:
+                        db.timeout = to
+                        db.write_cfg()
+                    self._send('set_timeout: %d\n' % db.timeout)
                 continue
             elif header == "get_pass":
                 if self.state() == ms_got_master:
@@ -592,17 +628,18 @@ def start_service(unixsock):
         pass
     
     server = master_server(unixsock, master_handler)
+    server.serve_forever()
     
-    # main loop
-    server_thread = threading.Thread(target=server.serve_forever)
-    server_thread.daemon = True
-    server_thread.start()
-    time.sleep(db.timeout * 60)
-    # todo: check time, delay if needed
-    
-    server.shutdown()
-    os.remove(unixsock)
-    os._exit(0)
+#     # main loop
+#     server_thread = threading.Thread(target=server.serve_forever)
+#     server_thread.daemon = True
+#     server_thread.start()
+#     time.sleep(db.timeout * 60)
+#     # todo: check time, delay if needed
+#     
+#     server.shutdown()
+#     os.remove(unixsock)
+#     os._exit(0)
 
 def start_service_daemon(unixsock):
     '''Start the service daemon.
@@ -809,10 +846,35 @@ class client:
             print resp
         return not is_resp_err(resp), get_resp_val(resp)
     
-        # print "get_pass, resp:", resp
-        # if resp.startswith("get_pass: "):
-        #    return resp[len("get_pass: "):]
-        # return None
+    def get_timeout(self):
+        '''get the timeout.
+        
+        :returns: success or not, the response.
+        '''
+        global verbose
+        
+        if not self.connected:
+            self.connect()
+
+        self.sock.sendall("get_timeout\n")
+        resp = self._recv_line()
+        if verbose:
+            print resp
+        return not is_resp_err(resp), get_resp_val(resp)
+        
+    def set_timeout(self, to):
+        '''set the timeout.
+        
+        :param to: the new timeout.
+        :returns: success or not, the response.
+        '''
+        if not self.connected:
+            self.connect()
+
+        self.sock.sendall("set_timeout %s\n" % to)
+        resp = self._recv_line()
+        # print "set_pass, resp:", resp
+        return not is_resp_err(resp), get_resp_val(resp)
         
     def close(self):
         '''close the service.
