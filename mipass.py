@@ -520,12 +520,9 @@ class master_handler(SocketServer.BaseRequestHandler):
         # [a:master:server:handle]
         global ti
         while not self.fin:
-            if ti != None:
-                ti.cancel()
+            ti.cancel()
             ti = threading.Timer(db.timeout * 60, kill_self)
             ti.start()
-            if verbose:
-                print "to ", db.timeout
             line = self._recv_line()
             header, body = get_header(line)
             if verbose:
@@ -619,7 +616,7 @@ def start_service(unixsock):
     
     :param unixsock: the socket file
     """
-    global db
+    global db, ti
     db = pass_db(conf_fn)
     
     try:
@@ -628,6 +625,10 @@ def start_service(unixsock):
         pass
     
     server = master_server(unixsock, master_handler)
+
+    ti=threading.Timer(db.timeout*60, kill_self)
+    ti.start()
+    
     server.serve_forever()
     
 #     # main loop
