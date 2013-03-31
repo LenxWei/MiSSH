@@ -129,7 +129,7 @@ class missh_cfg:
 
     def write_cfg(self):
         f = open(self.fn, "wb")
-        f.write("#!/usr/bin/env missh")
+        f.write("#!/usr/bin/env missh\n")
         f.write("# don't edit this file manually. please use 'missh -o'.\n\n")
         
         f.write("host = %s\n" % self.host)
