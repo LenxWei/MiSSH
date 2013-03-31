@@ -52,3 +52,7 @@ Configuration file format
 * master = NONCE,mi_hash(master_key)
 * host_sha256 = NONCE,key_encrypted_using_master1024_key_under_aes
 
+Lincense
+========
+
+A BSD 2-Clause License at https://github.com/LenxWei/MiSSH/blob/master/COPYING
