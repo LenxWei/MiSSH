@@ -13,12 +13,12 @@ Command line
 ============
 
 missh [opt] [file_path]
- * \-o file   open the session file
- * \-n file   create a new session file
- * \-c        edit or view missh's configuration file
- * \-k        kill the background password keeping service
- * \-h        show the help information
- * \-v        verbose mode
+ -o    open the session file
+ -n    create a new session file
+ -c    edit or view missh's configuration file
+ -k    kill the background password keeping service
+ -h    show the help information
+ -v    verbose mode
 
 .. * \-C file  use file as the configuration
  
