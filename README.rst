@@ -17,6 +17,7 @@ missh [opt] [file_path]
  * \-n file   create a new session file
  * \-c        edit or view missh's configuration file
 .. * \-C file  use file as the configuration
+
  * \-k        kill the background password keeping service
  * \-h        show the help information
  * \-v        verbose mode
@@ -31,6 +32,7 @@ Examples
 .. * missh -C myssh.conf my_host.msh
 .. * ./my_host.msh                     # when missh is in the correct path
 .. * ./my_host.msh -C myssh.conf
+
 * missh -k
 
 Configuration file format
