@@ -30,8 +30,8 @@ Examples
 * missh -n new_host.msh
 * missh -c
 .. * missh -C myssh.conf my_host.msh
-.. * ./my_host.msh                     # when missh is in the correct path
-.. * ./my_host.msh -C myssh.conf
+   * ./my_host.msh                     # when missh is in the correct path
+   * ./my_host.msh -C myssh.conf
 
 * missh -k
 
