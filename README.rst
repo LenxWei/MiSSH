@@ -14,7 +14,7 @@ Install
 
 please use easy_install_ to install missh::
 
-   easy_install missh
+   sudo easy_install missh
 
 .. _easy_install: https://pypi.python.org/pypi/setuptools 
 
