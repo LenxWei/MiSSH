@@ -342,11 +342,28 @@ def main():
         
     # connect to ssh
     if connect:
+        fail = False
         print cfg.cmdline()
         c = pexpect.spawn(cfg.cmdline())
-        c.expect("assword:", timeout=300)
-        c.sendline(pwd)
-        c.interact()
+        try:
+            i = c.expect(["yes/no","assword:"], timeout=30)
+            if i == 0:
+                y=raw_input("%syes/no)?" % c.before)
+                if y.strip().lower()=="yes":
+                    c.sendline("yes\n")
+                    i = c.expect("assword:", timeout=30)
+                else:
+                    c.sendline("no\n")
+                    print "Host key verification failed."
+                    fail=True
+                pass
+            if not fail:
+                c.sendline(pwd)
+        except:
+            print "timeout"
+        if not fail:
+            c.interact()
+            
 
 if __name__ == "__main__":
     main()
