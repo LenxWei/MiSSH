@@ -10,11 +10,11 @@ default_opt = \
 """% set dynamic socks proxy
 % -D 1080
 
-% forward local port to remote port, e.g. vnc @ host:1
+% forward a local port to a service at a remote port, e.g. vnc @ host:1
 % -L 5901
 % -L 5901:1.2.3.4:5901
 
-% forward remote port to local port
+% forward a remote port to a service at a local port
 % -R 8080"""
     
 c = None
@@ -107,11 +107,18 @@ class missh_cfg:
             self.read_cfg()
             
     def cmdline(self):
-        o = []
+        p=self.host.find(':')
+        if p>0:
+            host=self.host[:p]
+            o=['-p '+self.host[p+1:]]
+        else:
+            host=self.host
+            o=[]
         for i in self.opt:
-            if not i.strip().startswith("%"):
+            i=i.strip()
+            if not i.startswith("%"):
                 o.append(i)
-        return "ssh " + self.host + " " + " ".join(o)
+        return "ssh " + host + " " + " ".join(o)
         
     def update(self, host, opt, fwd):
         need_write = False

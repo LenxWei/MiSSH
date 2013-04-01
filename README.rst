@@ -9,6 +9,15 @@ Design
 * store session information in .msh files, including various ssh cmdline options
 * use a password keeping service to store encrypted passwords in ~/.missh
 
+Install
+=======
+
+please use easy_install_ to install missh::
+
+   easy_install missh
+
+.. _easy_install: https://pypi.python.org/pypi/setuptools 
+
 Command line
 ============
 
@@ -55,4 +64,4 @@ Configuration file format
 License
 =======
 
-A BSD 2-Clause License at https://github.com/LenxWei/MiSSH/blob/master/COPYING
+BSD 2-Clause License at https://github.com/LenxWei/MiSSH/blob/master/COPYING
