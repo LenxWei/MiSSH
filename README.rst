@@ -44,8 +44,8 @@ Examples
 * missh host.msh
 * missh -o host.msh
 * missh -n new_host.msh
-* missh -c
-* missh -k
+* missh -m
+* missh -t 120
 
 .. * missh -C myssh.conf my_host.msh
    * ./my_host.msh                     # when missh is in the correct path
