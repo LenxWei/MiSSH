@@ -19,7 +19,7 @@ setup(
     license = "BSD",
     keywords = "ssh session manager",
     platforms = "Independant",
-    url = "https://github.com/LenxWei/MiSSH"
+    url = "https://github.com/LenxWei/MiSSH",
     classifiers=[
         # Reference: http://pypi.python.org/pypi?%3Aaction=list_classifiers
         "Development Status :: 4 - Beta",

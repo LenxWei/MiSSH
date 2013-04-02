@@ -83,7 +83,7 @@ Open or create a seesion file::
 
 .. Edit the configuration::
 
-Host file format
+Session file format
 ================
 
 * host = user\@host:port
