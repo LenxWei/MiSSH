@@ -28,12 +28,13 @@ Command line
 ============
 
 missh [opt] [file_path]
- -o    open the session file
- -n    create a new session file
- -c    edit or view missh's configuration file
- -k    kill the background password keeping service
- -h    show the help information
- -v    verbose mode
+ -o             open the session file
+ -n             create a new session file
+ -m             change the master password
+ -t timeout     change the timeout of caching the master password, in minutes
+ -k             kill the background password keeping service
+ -h             show the help information
+ -v             verbose mode
 
 .. * \-C file  use file as the configuration
  

@@ -60,29 +60,6 @@ class MisshApp(npyscreen.NPSApp):
     def on_ok(self):
         self.connect = True
 
-class MisshCfg(npyscreen.NPSApp):
-    def __init__(self, master, to):
-        self.mastern = master
-        self.timeoutn = to
-        
-    def main(self):
-        npyscreen.setTheme(npyscreen.Themes.TransparentThemeDarkText)
-
-        F = npyscreen.ActionForm(name="MiSSH Configuration",)
-        self.master = F.add(npyscreen.TitlePassword, name="Master password:", value=self.mastern)
-        self.timeout = F.add(npyscreen.TitleText, name="Password cache timeout (in minutes):",
-                             value=self.timeoutn)
-        self.save = False
-        F.on_ok = self.on_ok
-        # This lets the user play with the Form.
-        F.edit()
-    
-    def __str__(self):
-        return "%s %s" % (self.master.value, self.timeout.value)
-
-    def on_ok(self):
-        self.save = True
-        
 def remove_remark(line):
     pos = line.find("#")
     if(pos >= 0):
@@ -107,15 +84,15 @@ class missh_cfg:
             self.read_cfg()
             
     def cmdline(self):
-        p=self.host.find(':')
-        if p>0:
-            host=self.host[:p]
-            o=['-p '+self.host[p+1:]]
+        p = self.host.find(':')
+        if p > 0:
+            host = self.host[:p]
+            o = ['-p ' + self.host[p + 1:]]
         else:
-            host=self.host
-            o=[]
+            host = self.host
+            o = []
         for i in self.opt:
-            i=i.strip()
+            i = i.strip()
             if not i.startswith("%"):
                 o.append(i)
         return "ssh " + host + " " + " ".join(o)
@@ -178,22 +155,27 @@ class missh_cfg:
             print "bad configuration file:", self.fn
             return
         
-        # import password
-        
+def set_master(c, create=True):
+    import getpass
+    if create:
+        note="Create the master password:"
+    else:
+        note="Input the new master password:"
+    while 1:
+        master_pwd = getpass.getpass(note)
+        master_pwd2 = getpass.getpass("Please repeat it:")
+        if master_pwd == master_pwd2:
+            break
+        print "They are not matched!"
+    ok, resp = c.set_master(master_pwd)
+    if not ok:
+        print "Can't set the master key. Error:", resp
+        sys.exit(1)
+    return master_pwd
+            
 def get_master(c, force=False):
     if c.need_master() == -2:
-        import getpass
-        while 1:
-            master_pwd = getpass.getpass("Create the master password:")
-            master_pwd2 = getpass.getpass("Please repeat it:")
-            if master_pwd == master_pwd2:
-                break
-            print "They are not matched!"
-        ok, resp = c.set_master(master_pwd)
-        if not ok:
-            print "Can't set the master key. Error:", resp
-            sys.exit(1)
-        return master_pwd
+        return set_master(c)
             
     elif force or c.need_master() == -1:
         import getpass
@@ -206,16 +188,20 @@ def get_master(c, force=False):
                 return master_pwd
     return None
 
-def usage():
+def usage(to=None):
     print "missh 0.1 by LenX (lenx.wei@gmail.com)"
+    print 
+    if to!=None:
+        print "The timeout of caching the master password is",to,"minutes."
     print """Usage:
 missh [opt] [file_path]
-   -o      open a session file
-   -n      create a new session file
-   -c      edit or view missh's configuration file
-   -k      kill all background missh processes
-   -h      show help information
-   -v      verbose mode
+   -o             open a session file
+   -n             create a new session file
+   -m             change the master password
+   -t timeout     change the timeout of caching the master password, in minutes
+   -k             kill all background missh processes
+   -h             show help information
+   -v             verbose mode
 """
     sys.exit(2)
 
@@ -227,7 +213,7 @@ def main():
     kill = False
     
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hvnock")
+        opts, args = getopt.getopt(sys.argv[1:], "hvnomt:k")
     except getopt.GetoptError as err:
         print str(err)  # will print something like "option -a not recognized"
         usage()
@@ -235,7 +221,8 @@ def main():
     edit = False
     kill = False
     create = False
-    edit_cfg = False
+    change_master = False
+    timeout= None
     
     for o, a in opts:
         if o == "-v":
@@ -250,35 +237,26 @@ def main():
             create = True
         elif o == '-k':
             kill = True
-        elif o == '-c':
-            edit_cfg = True
+        elif o == '-m':
+            change_master = True
+        elif o == '-t':
+            timeout=a
         else:
             print "Error: bad options - ( %s : %s )" % (o, a)
             usage()
 
     c = mipass.client(mipass.unixsock)
 
-    if edit_cfg:
+    if change_master:
         c.connect()
-        master_pwd = get_master(c, True)
-        ok, to = c.get_timeout()
-        if not ok:
-            to = 120
-        App = MisshCfg(master_pwd, to)
-        App.run()
-        if App.save:
-            try:
-                timeout = int(App.timeout.value)
-            except:
-                timeout = -1
-            if timeout > 0:
-                if str(timeout) != to:
-                    c.set_timeout(timeout)
-            else:
-                print "Bad timeout:", App.timeout.value
-            if App.master.value != master_pwd:
-                c.set_master(App.master.value)
-        sys.exit(0)
+        if c.need_master()==-2:
+            master_pwd = get_master(c, True)
+        else:
+            master_pwd = get_master(c, True)
+            new_pwd = set_master(c, False)
+            if new_pwd!=master_pwd:
+                c.set_master(new_pwd)
+        return
     
     if kill:
         ok, resp = c.kill()
@@ -287,11 +265,30 @@ def main():
         else:
             print resp
         sys.exit(0)
+
+    ok, to = c.get_timeout()
+    if timeout!=None:
+        try:
+            t1=int(timeout)
+        except:
+            t1=-1
+        if t1<=0:
+            print "Bad timeout:",timeout
+            return
+        
+        if not ok or to!=timeout:
+            c.set_timeout(timeout)
+            print "The timeout is set to %s." % timeout
+        else:
+            print "The timeout is still %s." % timeout
+        return
     
     if(len(args) == 1):
         fn = args[0]
-    else:    
-        usage()
+    else:
+        if not ok:
+            to=None
+        usage(to)
         sys.exit(2)
 
     if edit and not os.path.exists(fn) and not create:
@@ -346,16 +343,16 @@ def main():
         print cfg.cmdline()
         c = pexpect.spawn(cfg.cmdline())
         try:
-            i = c.expect(["yes/no","assword:"], timeout=30)
+            i = c.expect(["yes/no", "assword:"], timeout=30)
             if i == 0:
-                y=raw_input("%syes/no)?" % c.before)
-                if y.strip().lower()=="yes":
+                y = raw_input("%syes/no)?" % c.before)
+                if y.strip().lower() == "yes":
                     c.sendline("yes\n")
                     i = c.expect("assword:", timeout=30)
                 else:
                     c.sendline("no\n")
                     print "Host key verification failed."
-                    fail=True
+                    fail = True
                 pass
             if not fail:
                 c.sendline(pwd)
