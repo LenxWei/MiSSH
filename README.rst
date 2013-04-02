@@ -44,6 +44,36 @@ Examples
    * ./my_host.msh                     # when missh is in the correct path
    * ./my_host.msh -C myssh.conf
 
+Screen shots
+============
+
+Open or create a seesion file::
+
+ ┌ MiSSH - test.msh ────────────────────────────────────────────────────────────┐
+ │                                                                              │
+ │ Host:           user@host.net:22                                             │
+ │ Password:       ---                                                          │
+ │ Other options:                                                               │
+ │                                                                              │
+ │ % set dynamic socks proxy                                                    │
+ │ -D 1080                                                                      │
+ │                                                                              │
+ │ % forward a local port to a service at a remote port, e.g. vnc @ host:1      │
+ │ % -L 5901                                                                    │
+ │ % -L 5901:1.2.3.4:5901                                                       │
+ │                                                                              │
+ │ % forward a remote port to a service at a local port                         │
+ │ % -R 8080                                                                    │
+ │                                                                              │
+ │                                                                              │
+ │                                                                              │
+ │ [ ]  Forward only?                                                           │
+ │                                                                              │
+ │                                                                              │
+ │                                                                              │
+ │                                                               Cancel    OK   │
+ └──────────────────────────────────────────────────────────────────────────────┘
+
 Host file format
 ================
 
