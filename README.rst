@@ -88,9 +88,9 @@ Host file format
 * host = user\@host:port
 * forward = 1 # or 0
 * # there might be multiple lines of opt:
-* opt = adfadfadfasdfs
-* opt = adfasfasdfasdf
-* opt = adfadfadsfadsf
+* opt = -D 1080
+* opt = -L 5901
+* opt = -R 8080 
 
 Configuration file format
 =========================
