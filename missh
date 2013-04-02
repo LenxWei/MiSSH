@@ -291,7 +291,7 @@ def main():
         usage(to)
         sys.exit(2)
 
-    if edit and not os.path.exists(fn) and not create:
+    if not os.path.exists(fn) and not create:
         print "Session file is not found:", fn
         sys.exit(1)
     
@@ -357,7 +357,8 @@ def main():
             if not fail:
                 c.sendline(pwd)
         except:
-            print "timeout"
+            fail=True
+            print c.before
         if not fail:
             c.interact()
             
