@@ -9,6 +9,12 @@ Design
 * store session information in .msh files, including various ssh cmdline options
 * use a password keeping service to store encrypted passwords in ~/.missh
 
+Platforms
+=========
+
+MiSSH is written in Python 2.7. It should work well on most POSIX platforms.
+I have tested it on Mac OSX, Linux and Cygwin.
+
 Install
 =======
 
@@ -73,6 +79,8 @@ Open or create a seesion file::
  │                                                                              │
  │                                                               Cancel    OK   │
  └──────────────────────────────────────────────────────────────────────────────┘
+
+.. Edit the configuration::
 
 Host file format
 ================
