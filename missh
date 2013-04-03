@@ -5,6 +5,7 @@ import os
 import pexpect
 import getopt
 import mipass
+import platform
 
 default_opt = \
 """% set dynamic socks proxy
@@ -340,6 +341,11 @@ def main():
     # connect to ssh
     if connect:
         fail = False
+        
+        #workaround a bug of term of mac osx
+        if platform.system().lower()=="darwin":
+            os.system("clear")
+            
         print cfg.cmdline()
         c = pexpect.spawn(cfg.cmdline())
         try:
@@ -361,6 +367,10 @@ def main():
             print c.before
         if not fail:
             c.interact()
+
+        #workaround a bug of term of mac osx
+        if platform.system().lower()=="darwin":
+            os.system("tput reset")
             
 
 if __name__ == "__main__":
