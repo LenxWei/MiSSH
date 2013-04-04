@@ -2,7 +2,7 @@
 import npyscreen
 import sys
 import os
-import pexpect
+import mipexpect
 import getopt
 import mipass
 import platform
@@ -343,7 +343,7 @@ def main():
         #    os.system("clear")
             
         print cfg.cmdline()
-        c = pexpect.spawn(cfg.cmdline())
+        c = mipexpect.spawn(cfg.cmdline())
         try:
             i = c.expect(["yes/no", "assword:"], timeout=30)
             if i == 0:
