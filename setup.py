@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 setup(
     name = "missh",
-    version = "0.1.4",
+    version = "0.1.5",
 #    packages = find_packages(), #["mipass","missh-nox"],
     py_modules = ["mipass","mipexpect"],
     scripts = ['missh'],
