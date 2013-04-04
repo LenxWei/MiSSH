@@ -5,9 +5,9 @@ from setuptools import setup, find_packages
 
 setup(
     name = "missh",
-    version = "0.1.3",
+    version = "0.1.4",
 #    packages = find_packages(), #["mipass","missh-nox"],
-    py_modules = ["mipass"],
+    py_modules = ["mipass","mipexpect"],
     scripts = ['missh'],
        
     install_requires = ["npyscreen >=2.0pre47", "pycrypto >=2.4.0", "python-daemon >=1.5.5", "pexpect >=2.3"],

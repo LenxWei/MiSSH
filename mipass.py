@@ -27,6 +27,7 @@ import socket
 import threading
 import SocketServer
 import os
+import stat
 import time 
 import sys
 import random
@@ -625,7 +626,7 @@ def start_service(unixsock):
         pass
     
     server = master_server(unixsock, master_handler)
-
+    os.chmod(unixsock, stat.S_IREAD | stat.S_IWRITE)
     ti=threading.Timer(db.timeout*60, kill_self)
     ti.start()
     
