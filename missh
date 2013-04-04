@@ -21,12 +21,12 @@ default_opt = \
 c = None
 
 class MisshApp(npyscreen.NPSApp):
-    def __init__(self, fn, host, password, opt, fwd):
+    def __init__(self, fn, host, password, opt):
         self.fn = fn
         self.hostn = host
         self.passwordn = password
         self.optn = opt
-        self.fwdn = fwd
+#        self.fwdn = fwd
     
     def main(self):
         npyscreen.setTheme(npyscreen.Themes.TransparentThemeDarkText)
@@ -40,7 +40,7 @@ class MisshApp(npyscreen.NPSApp):
         self.password = F.add(npyscreen.TitlePassword, name="Password:", value=self.passwordn)
         F.add(npyscreen.TitleFixedText, name="Other options:", height=1)
         self.options = F.add(npyscreen.MultiLineEdit, value=self.optn, max_height=12)
-        self.forward_only = F.add(npyscreen.Checkbox, name="Forward only?", value=self.fwdn)
+#        self.forward_only = F.add(npyscreen.Checkbox, name="Forward only?", value=self.fwdn)
 #        self.forward_only= F.add(npyscreen.TitleMultiSelect, value=self.fwdn,
 #                                 name="Mode",values=["Forward only?"],scroll_exit=True)
         self.connect = False
@@ -80,7 +80,7 @@ class missh_cfg:
         self.fn = fn
         self.host = None
         self.opt = []
-        self.fwd = 0
+#        self.fwd = 0
         if not new:
             self.read_cfg()
             
@@ -98,16 +98,13 @@ class missh_cfg:
                 o.append(i)
         return "ssh " + host + " " + " ".join(o)
         
-    def update(self, host, opt, fwd):
+    def update(self, host, opt):
         need_write = False
         if self.host != host:
             self.host = host
             need_write = True
         if self.opt != opt:
             self.opt = opt
-            need_write = True
-        if self.fwd != fwd:
-            self.fwd = fwd
             need_write = True
         if need_write:
             self.write_cfg()
@@ -118,7 +115,6 @@ class missh_cfg:
         f.write("# don't edit this file manually. please use 'missh -o'.\n\n")
         
         f.write("host = %s\n" % self.host)
-        f.write("forward = %s\n" % self.fwd)
         for i in self.opt:
             f.write("opt = %s\n" % i)
         f.close()
@@ -144,7 +140,7 @@ class missh_cfg:
                     elif(key == "opt"):
                         self.opt.append(val)
                     elif(key == "forward"):
-                        self.fwd = int(val)
+                        pass # obsolete
                     else:
                         raise "bad key"
                 except:
@@ -326,12 +322,12 @@ def main():
     # show dialog if needed
     # todo: verbose mode
     if edit:
-        App = MisshApp(fn, cfg.host, pwd, "\n".join(cfg.opt), cfg.fwd)
+        App = MisshApp(fn, cfg.host, pwd, "\n".join(cfg.opt))
         App.run()
         connect = App.connect
         # update config
         if connect:
-            cfg.update(App.host.value, App.options.value.split('\n'), App.forward_only.value)
+            cfg.update(App.host.value, App.options.value.split('\n'))
             # update pwd
             if pwd != App.password.value:
                 pwd = App.password.value
@@ -343,8 +339,8 @@ def main():
         fail = False
         
         #workaround a bug of term of mac osx
-        if platform.system().lower()=="darwin":
-            os.system("clear")
+        #if platform.system().lower()=="darwin":
+        #    os.system("clear")
             
         print cfg.cmdline()
         c = pexpect.spawn(cfg.cmdline())
@@ -369,8 +365,8 @@ def main():
             c.interact()
 
         #workaround a bug of term of mac osx
-        if platform.system().lower()=="darwin":
-            os.system("tput reset")
+        #if platform.system().lower()=="darwin":
+        #    os.system("tput reset")
             
 
 if __name__ == "__main__":

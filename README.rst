@@ -78,10 +78,6 @@ Open or create a seesion file::
  │                                                                              │
  │                                                                              │
  │                                                                              │
- │ [ ]  Forward only?                                                           │
- │                                                                              │
- │                                                                              │
- │                                                                              │
  │                                                               Cancel    OK   │
  └──────────────────────────────────────────────────────────────────────────────┘
 
@@ -91,7 +87,6 @@ Session file format
 ================
 
 * host = user\@host:port
-* forward = 1 # or 0
 * # there might be multiple lines of opt:
 * opt = -D 1080
 * opt = -L 5901
