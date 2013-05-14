@@ -42,6 +42,13 @@ missh [opt] [file_path]
 
 .. * \-C file  use file as the configuration
  
+Notice 
+======
+
+Please DO NOT change the term size AFTER login, otherwise the term might get stuck.
+If it got stuck, you need to log out and log in again.
+This is a problem of the term, not MiSSH :)
+
 Examples
 ========
 
