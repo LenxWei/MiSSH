@@ -6,6 +6,7 @@ import mipexpect
 import getopt
 import mipass
 import platform
+import time
 
 default_opt = \
 """% set dynamic socks proxy
@@ -197,6 +198,7 @@ missh [opt] [file_path]
    -m             change the master password
    -t timeout     change the timeout of caching the master password, in minutes
    -k             kill all background missh processes
+   -r             reconnect automatically after disconnection
    -h             show help information
    -v             verbose mode
 """
@@ -210,7 +212,7 @@ def main():
     kill = False
     
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hvnomt:k")
+        opts, args = getopt.getopt(sys.argv[1:], "hvnomt:kr")
     except getopt.GetoptError as err:
         print str(err)  # will print something like "option -a not recognized"
         usage()
@@ -220,6 +222,7 @@ def main():
     create = False
     change_master = False
     timeout= None
+    recon = False
     
     for o, a in opts:
         if o == "-v":
@@ -238,6 +241,8 @@ def main():
             change_master = True
         elif o == '-t':
             timeout=a
+        elif o == '-r':
+            recon = True
         else:
             print "Error: bad options - ( %s : %s )" % (o, a)
             usage()
@@ -336,37 +341,45 @@ def main():
         
     # connect to ssh
     if connect:
-        fail = False
+        while 1:
+            fail = False
         
-        #workaround a bug of term of mac osx
-        #if platform.system().lower()=="darwin":
-        #    os.system("clear")
+            #workaround a bug of term of mac osx
+            #if platform.system().lower()=="darwin":
+            #    os.system("clear")
             
-        print cfg.cmdline()
-        c = mipexpect.spawn(cfg.cmdline())
-        try:
-            i = c.expect(["yes/no", "assword:"], timeout=30)
-            if i == 0:
-                y = raw_input("%syes/no)?" % c.before)
-                if y.strip().lower() == "yes":
-                    c.sendline("yes\n")
-                    i = c.expect("assword:", timeout=30)
-                else:
-                    c.sendline("no\n")
-                    print "Host key verification failed."
-                    fail = True
-                pass
+            print cfg.cmdline()
+            c = mipexpect.spawn(cfg.cmdline())
+            try:
+                i = c.expect(["yes/no", "assword:"], timeout=30)
+                if i == 0:
+                    y = raw_input("%syes/no)?" % c.before)
+                    if y.strip().lower() == "yes":
+                        c.sendline("yes\n")
+                        i = c.expect("assword:", timeout=30)
+                    else:
+                        c.sendline("no\n")
+                        print "Host key verification failed."
+                        fail = True
+                    pass
+                if not fail:
+                    c.sendline(pwd)
+            except:
+                fail=True
+                print c.before
             if not fail:
-                c.sendline(pwd)
-        except:
-            fail=True
-            print c.before
-        if not fail:
-            c.interact()
+                c.interact()
+                
+            if recon:
+                print "[%s] Disconnected. Try to reconnect after 3 sec. You can break it using CTRL-C." %\
+                     time.ctime()
+                time.sleep(3)
+                continue
 
-        #workaround a bug of term of mac osx
-        #if platform.system().lower()=="darwin":
-        #    os.system("tput reset")
+            break
+            #workaround a bug of term of mac osx
+            #if platform.system().lower()=="darwin":
+            #    os.system("tput reset")
             
 
 if __name__ == "__main__":

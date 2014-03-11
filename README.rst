@@ -37,6 +37,7 @@ missh [opt] [file_path]
  -m             change the master password
  -t timeout     change the timeout of caching the master password, in minutes
  -k             kill the background password keeping service
+ -r             reconnect automatically after disconnection
  -h             show the help information
  -v             verbose mode
 
