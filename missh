@@ -17,7 +17,11 @@ default_opt = \
 % -L 5901:1.2.3.4:5901
 
 % forward a remote port to a service at a local port
-% -R 8080"""
+% -R 8080
+
+% sftp options
+%# -r
+"""
     
 c = None
 
@@ -77,10 +81,11 @@ def get_key_val(line):
 
 class missh_cfg:
     fn = ""
-    def __init__(self, fn, new=False):
+    def __init__(self, fn, new=False, ftp=False):
         self.fn = fn
         self.host = None
         self.opt = []
+        self.ftp = ftp
 #        self.fwd = 0
         if not new:
             self.read_cfg()
@@ -89,15 +94,20 @@ class missh_cfg:
         p = self.host.find(':')
         if p > 0:
             host = self.host[:p]
-            o = ['-p ' + self.host[p + 1:]]
+            o = [(self.ftp and '-P ' or '-p ') + self.host[p + 1:]]
         else:
             host = self.host
             o = []
         for i in self.opt:
             i = i.strip()
             if not i.startswith("%"):
-                o.append(i)
-        return "ssh " + host + " " + " ".join(o)
+                if self.ftp:
+                    if i.startswith("#"):
+                        o.append(i[1:].strip())
+                else:
+                    if not i.startswith("#"):
+                        o.append(i)
+        return (self.ftp and 'sftp ' or "ssh ") + " ".join(o) + " " + host
         
     def update(self, host, opt):
         need_write = False
@@ -187,7 +197,7 @@ def get_master(c, force=False):
     return None
 
 def usage(to=None):
-    print "missh 0.2 by LenX (lenx.wei@gmail.com)"
+    print "missh 0.3.0 by LenX (lenx.wei@gmail.com)"
     print 
     if to!=None:
         print "The timeout of caching the master password is",to,"minutes."
@@ -199,6 +209,7 @@ missh [opt] [file_path]
    -t timeout     change the timeout of caching the master password, in minutes
    -k             kill all background missh processes
    -r             reconnect automatically after disconnection
+   -f             use sftp to connect the host
    -h             show help information
    -v             verbose mode
 """
@@ -212,7 +223,7 @@ def main():
     kill = False
     
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hvnomt:kr")
+        opts, args = getopt.getopt(sys.argv[1:], "hvnomt:krsf")
     except getopt.GetoptError as err:
         print str(err)  # will print something like "option -a not recognized"
         usage()
@@ -223,6 +234,7 @@ def main():
     change_master = False
     timeout= None
     recon = False
+    ftp = False
     
     for o, a in opts:
         if o == "-v":
@@ -243,6 +255,8 @@ def main():
             timeout=a
         elif o == '-r':
             recon = True
+        elif o == '-f':
+            ftp = True
         else:
             print "Error: bad options - ( %s : %s )" % (o, a)
             usage()
@@ -309,7 +323,7 @@ def main():
     
     # parse msh file
     connect = True
-    cfg = missh_cfg(fn, create)
+    cfg = missh_cfg(fn, create, ftp=ftp)
         
     # [a:login:main:get_password]
     if create:

@@ -1,7 +1,7 @@
 Welcome to
 
-Minimalist Session Manager for SSH
-**********************************
+Minimalist Session Manager for SSH/SFTP
+***************************************
 
 Design
 ======
@@ -38,6 +38,7 @@ missh [opt] [file_path]
  -t timeout     change the timeout of caching the master password, in minutes
  -k             kill the background password keeping service
  -r             reconnect automatically after disconnection
+ -f             use sftp to connect the host
  -h             show the help information
  -v             verbose mode
 
@@ -56,6 +57,7 @@ Examples
 * missh host.msh
 * missh -o host.msh
 * missh -n new_host.msh
+* missh -f host.msh
 * missh -m
 * missh -t 120
 
@@ -84,6 +86,8 @@ Open or create a seesion file::
  │ % forward a remote port to a service at a local port                         │
  │ % -R 8080                                                                    │
  │                                                                              │
+ │ % sftp options use # as the line header                                      │
+ │ # -r                                                                         │
  │                                                                              │
  │                                                                              │
  │                                                               Cancel    OK   │
